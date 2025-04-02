@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MdMyLocation, MdLocationCity, MdOutlinePublic } from 'react-icons/md';
-import { FaMapMarkerAlt, FaGoogle } from 'react-icons/fa';
+import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, MdClose, MdColorLens, MdLogout } from 'react-icons/md';
+import { FaMapMarkerAlt, FaGoogle, FaHistory } from 'react-icons/fa';
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
 import axios from 'axios';
@@ -60,7 +60,9 @@ const InfoPanel = styled.div`
   padding: 15px;
   border-radius: 5px;
   box-shadow: 0 0 10px rgba(0,0,0,0.2);
-  max-width: 250px;
+  max-width: 300px;
+  max-height: 80vh;
+  overflow-y: auto;
 `;
 
 const LocationInfo = styled.div`
@@ -111,6 +113,24 @@ const GoogleButton = styled.button`
   }
 `;
 
+const LogoutButton = styled.button`
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1500;
+  background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  &:hover {
+    background-color: #f0f0f0;
+  }
+`;
+
 const PermissionOverlay = styled.div`
   position: absolute;
   top: 0;
@@ -134,8 +154,103 @@ const PermissionContainer = styled.div`
   box-shadow: 0 0 20px rgba(0,0,0,0.3);
 `;
 
-// Fonction pour créer une icône personnalisée basée sur un composant React
-const createCustomIcon = () => {
+const HistoryContainer = styled.div`
+  margin-top: 20px;
+  border-top: 1px solid #eee;
+  padding-top: 10px;
+`;
+
+const HistoryItem = styled.div`
+  padding: 8px;
+  margin-bottom: 5px;
+  border-radius: 4px;
+  background-color: #f5f5f5;
+  font-size: 0.9em;
+  cursor: pointer;
+  &:hover {
+    background-color: #e0e0e0;
+  }
+`;
+
+const SectionTitle = styled.h4`
+  margin: 15px 0 5px 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+`;
+
+const CloseButton = styled.button`
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  z-index: 1001;
+  &:hover {
+    background-color: rgba(0,0,0,0.05);
+    border-radius: 50%;
+  }
+`;
+
+const PopupHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  position: relative;
+`;
+
+const ColorPickerContainer = styled.div`
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background-color: white;
+  padding: 10px;
+  border-radius: 5px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const ColorButton = styled.button`
+  position: absolute;
+  top: 70px;
+  left: 10px;
+  z-index: 1000;
+  background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  &:hover {
+    background-color: #f0f0f0;
+  }
+`;
+
+// Sous-composant pour gérer l'ouverture/fermeture des fenêtres contextuelles
+const ContextualWindowController = ({ isOpen, toggleWindow, children, title }) => {
+  return (
+    <div style={{ position: 'relative' }}>
+      {children}
+      <CloseButton onClick={() => toggleWindow(false)}>
+        <MdClose size={20} />
+      </CloseButton>
+    </div>
+  );
+};
+
+// Fonction pour créer une icône personnalisée basée sur un composant React et une couleur
+const createCustomIcon = (color = "#0066ff") => {
   const iconHtml = renderToString(
     <div style={{ 
       background: 'white', 
@@ -146,7 +261,7 @@ const createCustomIcon = () => {
       justifyContent: 'center',
       alignItems: 'center'
     }}>
-      <MdMyLocation size={24} color="#0066ff" />
+      <MdMyLocation size={24} color={color} />
     </div>
   );
 
@@ -159,31 +274,108 @@ const createCustomIcon = () => {
 };
 
 // Composant pour suivre la position actuelle
-function LocationMarker({ onLocationFound }) {
+function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOpen, togglePopup }) {
   const [position, setPosition] = useState(null);
+  const [speed, setSpeed] = useState(null);
+  const [altitude, setAltitude] = useState(null);
   const map = useMap();
+  const markerRef = useRef(null);
 
-  const locationIcon = createCustomIcon();
+  const locationIcon = createCustomIcon(markerColor);
+  const watchIdRef = useRef(null);
 
   useEffect(() => {
-    map.locate({ watch: true, setView: false, maxZoom: 16, enableHighAccuracy: true });
-
-    map.on('locationfound', (e) => {
-      setPosition(e.latlng);
-      if (onLocationFound) {
-        onLocationFound(e.latlng);
-      }
-    });
-
+    if (navigator.geolocation) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, altitude, speed, accuracy } = pos.coords;
+          const newPosition = { lat: latitude, lng: longitude };
+          
+          setPosition(newPosition);
+          setSpeed(speed !== null ? speed : 'Non disponible');
+          setAltitude(altitude !== null ? altitude : 'Non disponible');
+          
+          if (onLocationFound) {
+            onLocationFound(newPosition);
+          }
+          
+          if (onNewPosition) {
+            onNewPosition({
+              position: newPosition,
+              altitude,
+              speed,
+              accuracy,
+              timestamp: new Date().toISOString()
+            });
+          }
+        },
+        (error) => {
+          console.error('Error tracking location:', error);
+        },
+        { 
+          enableHighAccuracy: true, 
+          timeout: 10000, 
+          maximumAge: 0 
+        }
+      );
+    }
+    
     return () => {
-      map.stopLocate();
-      map.off('locationfound');
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
     };
-  }, [map, onLocationFound]);
+  }, [map, onLocationFound, onNewPosition]);
+
+  // Effet pour ouvrir ou fermer le popup selon l'état
+  useEffect(() => {
+    if (markerRef.current) {
+      if (isPopupOpen) {
+        markerRef.current.openPopup();
+      } else {
+        markerRef.current.closePopup();
+      }
+    }
+  }, [isPopupOpen]);
+
+  // Mettre à jour l'icône lorsque la couleur change
+  useEffect(() => {
+    if (markerRef.current) {
+      markerRef.current.setIcon(createCustomIcon(markerColor));
+    }
+  }, [markerColor]);
 
   return position === null ? null : (
-    <Marker position={position} icon={locationIcon}>
-      <Popup>Vous êtes ici</Popup>
+    <Marker 
+      position={position} 
+      icon={locationIcon}
+      ref={markerRef}
+      eventHandlers={{
+        popupopen: () => {
+          if (!isPopupOpen) togglePopup(true);
+        },
+        popupclose: () => {
+          if (isPopupOpen) togglePopup(false);
+        }
+      }}
+    >
+      <Popup 
+        autoPan={true}
+        closeButton={false}
+      >
+        <div>
+          <PopupHeader>
+            <h3>Votre position actuelle</h3>
+            <CloseButton onClick={() => togglePopup(false)}>
+              <MdClose size={20} />
+            </CloseButton>
+          </PopupHeader>
+          <p>Latitude: {position.lat.toFixed(6)}</p>
+          <p>Longitude: {position.lng.toFixed(6)}</p>
+          {altitude !== null && <p>Altitude: {typeof altitude === 'number' ? `${altitude.toFixed(1)} m` : altitude}</p>}
+          {speed !== null && <p>Vitesse: {typeof speed === 'number' ? `${(speed * 3.6).toFixed(1)} km/h` : speed}</p>}
+        </div>
+      </Popup>
     </Marker>
   );
 }
@@ -191,13 +383,43 @@ function LocationMarker({ onLocationFound }) {
 function GeoSpace() {
   const [mapCenter, setMapCenter] = useState([48.8566, 2.3522]); // Paris par défaut
   const [zoom, setZoom] = useState(13);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    // Vérifier si l'utilisateur est déjà connecté lors du chargement initial
+    return localStorage.getItem('isAuthenticated') === 'true';
+  });
   const [permissionRequested, setPermissionRequested] = useState(false);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const [showInfoPanel, setShowInfoPanel] = useState(true);
+  const [markerColor, setMarkerColor] = useState("#0066ff");
+  const [showColorPicker, setShowColorPicker] = useState(false);
   const [locationInfo, setLocationInfo] = useState({
     neighborhood: '',
     city: '',
-    country: ''
+    country: '',
+    latitude: '',
+    longitude: '',
+    altitude: '',
+    speed: '',
+    ip: '',
+    accuracy: ''
   });
+  const [locationHistory, setLocationHistory] = useState([]);
+  const [userIp, setUserIp] = useState('');
+  
+  // Récupérer l'adresse IP de l'utilisateur au démarrage
+  useEffect(() => {
+    const fetchUserIp = async () => {
+      try {
+        const response = await axios.get('https://api.ipify.org?format=json');
+        setUserIp(response.data.ip);
+      } catch (error) {
+        console.error('Erreur lors de la récupération de l\'adresse IP:', error);
+        setUserIp('Non disponible');
+      }
+    };
+    
+    fetchUserIp();
+  }, []);
 
   // Fonction pour l'authentification Google
   const handleGoogleAuth = () => {
@@ -206,9 +428,17 @@ function GeoSpace() {
     console.log("Tentative d'authentification Google");
     setTimeout(() => {
       setIsAuthenticated(true);
+      // Sauvegarder l'état d'authentification dans localStorage
+      localStorage.setItem('isAuthenticated', 'true');
       // Après l'authentification, demander la permission de localisation
       setPermissionRequested(true);
     }, 1000);
+  };
+  
+  // Fonction pour se déconnecter
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('isAuthenticated');
   };
 
   // Fonction pour demander l'accès à la géolocalisation
@@ -216,12 +446,13 @@ function GeoSpace() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const { latitude, longitude } = position.coords;
+          const { latitude, longitude, altitude, speed, accuracy } = position.coords;
           setMapCenter([latitude, longitude]);
           setZoom(16);
           setPermissionRequested(false);
+          setIsPopupOpen(true); // Ouvrir le popup après obtention de la position
           // Récupérer les informations de localisation
-          fetchLocationDetails(latitude, longitude);
+          fetchLocationDetails(latitude, longitude, altitude, speed, accuracy);
         },
         (error) => {
           console.error('Error getting location:', error);
@@ -236,8 +467,8 @@ function GeoSpace() {
     }
   };
 
-  // Fonction pour récupérer les détails de localisation (quartier, ville, pays)
-  const fetchLocationDetails = async (latitude, longitude) => {
+  // Fonction pour récupérer les détails de localisation
+  const fetchLocationDetails = async (latitude, longitude, altitude, speed, accuracy) => {
     try {
       // Utilisation de l'API Nominatim OpenStreetMap pour le geocoding inverse
       const response = await axios.get(
@@ -249,14 +480,26 @@ function GeoSpace() {
       setLocationInfo({
         neighborhood: address.suburb || address.neighbourhood || address.residential || 'Non disponible',
         city: address.city || address.town || address.village || 'Non disponible',
-        country: address.country || 'Non disponible'
+        country: address.country || 'Non disponible',
+        latitude: latitude.toFixed(6),
+        longitude: longitude.toFixed(6),
+        altitude: altitude !== null ? `${altitude.toFixed(1)} m` : 'Non disponible',
+        speed: speed !== null ? `${(speed * 3.6).toFixed(1)} km/h` : 'Non disponible',
+        ip: userIp,
+        accuracy: accuracy ? `${accuracy.toFixed(1)} m` : 'Non disponible'
       });
     } catch (error) {
       console.error('Erreur lors de la récupération des détails de localisation:', error);
       setLocationInfo({
         neighborhood: 'Non disponible',
         city: 'Non disponible',
-        country: 'Non disponible'
+        country: 'Non disponible',
+        latitude: latitude.toFixed(6),
+        longitude: longitude.toFixed(6),
+        altitude: altitude !== null ? `${altitude.toFixed(1)} m` : 'Non disponible',
+        speed: speed !== null ? `${(speed * 3.6).toFixed(1)} km/h` : 'Non disponible',
+        ip: userIp,
+        accuracy: accuracy ? `${accuracy.toFixed(1)} m` : 'Non disponible'
       });
     }
   };
@@ -266,10 +509,11 @@ function GeoSpace() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const { latitude, longitude } = position.coords;
+          const { latitude, longitude, altitude, speed, accuracy } = position.coords;
           setMapCenter([latitude, longitude]);
           setZoom(16);
-          fetchLocationDetails(latitude, longitude);
+          setIsPopupOpen(true); // Ouvrir le popup quand on centre sur la position
+          fetchLocationDetails(latitude, longitude, altitude, speed, accuracy);
         },
         (error) => {
           console.error('Error getting location:', error);
@@ -283,8 +527,74 @@ function GeoSpace() {
   };
 
   const handleLocationFound = (latlng) => {
-    fetchLocationDetails(latlng.lat, latlng.lng);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { altitude, speed, accuracy } = position.coords;
+          fetchLocationDetails(latlng.lat, latlng.lng, altitude, speed, accuracy);
+        },
+        (error) => {
+          console.error('Error getting location details:', error);
+          fetchLocationDetails(latlng.lat, latlng.lng, null, null, null);
+        },
+        { enableHighAccuracy: true }
+      );
+    } else {
+      fetchLocationDetails(latlng.lat, latlng.lng, null, null, null);
+    }
   };
+
+  // Fonction pour enregistrer une nouvelle position
+  const handleNewPosition = (positionData) => {
+    // Ajouter la nouvelle position à l'historique
+    const newHistoryItem = {
+      ...positionData,
+      id: Date.now(), // Utiliser un timestamp comme identifiant unique
+    };
+    
+    setLocationHistory(prevHistory => {
+      // Limiter l'historique aux 20 dernières positions
+      const updatedHistory = [newHistoryItem, ...prevHistory].slice(0, 20);
+      
+      // Ici, vous pourriez enregistrer l'historique dans une collection de base de données
+      // saveToDatabase(newHistoryItem);
+      
+      return updatedHistory;
+    });
+  };
+
+  // Fonction pour centrer la carte sur une position de l'historique
+  const goToHistoricalPosition = (position) => {
+    setMapCenter([position.position.lat, position.position.lng]);
+    setZoom(16);
+  };
+  
+  // Formater l'heure pour l'affichage dans l'historique
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString();
+  };
+
+  // Fonction pour basculer l'état du popup
+  const togglePopup = (state) => {
+    setIsPopupOpen(typeof state === 'boolean' ? state : !isPopupOpen);
+  };
+  
+  // Fonction pour basculer l'affichage du panneau d'information
+  const toggleInfoPanel = (state) => {
+    setShowInfoPanel(typeof state === 'boolean' ? state : !showInfoPanel);
+  };
+
+  // Liste de couleurs prédéfinies pour les marqueurs
+  const predefinedColors = [
+    "#0066ff", // Bleu (par défaut)
+    "#FF4136", // Rouge
+    "#2ECC40", // Vert
+    "#FF851B", // Orange
+    "#B10DC9", // Violet
+    "#111111", // Noir
+    "#85144b"  // Bordeaux
+  ];
 
   if (!isAuthenticated) {
     return (
@@ -320,36 +630,150 @@ function GeoSpace() {
         </PermissionOverlay>
       )}
       
+      {/* Bouton de déconnexion affiché uniquement lorsque l'utilisateur est connecté */}
+      <LogoutButton onClick={handleLogout}>
+        <MdLogout size={18} />
+        Déconnexion
+      </LogoutButton>
+      
       <MapWrapper>
         <MapContainer center={mapCenter} zoom={zoom} scrollWheelZoom={true}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <LocationMarker onLocationFound={handleLocationFound} />
+          <LocationMarker 
+            onLocationFound={handleLocationFound} 
+            onNewPosition={handleNewPosition}
+            markerColor={markerColor}
+            isPopupOpen={isPopupOpen}
+            togglePopup={togglePopup}
+          />
           <MapController center={mapCenter} zoom={zoom} />
         </MapContainer>
 
-        <InfoPanel>
-          <h3>Votre localisation</h3>
-          <LocationInfo>
-            <FaMapMarkerAlt size={16} color="#FF4136" />
-            <span>Quartier: {locationInfo.neighborhood}</span>
-          </LocationInfo>
-          <LocationInfo>
-            <MdLocationCity size={16} color="#0074D9" />
-            <span>Ville: {locationInfo.city}</span>
-          </LocationInfo>
-          <LocationInfo>
-            <MdOutlinePublic size={16} color="#2ECC40" />
-            <span>Pays: {locationInfo.country}</span>
-          </LocationInfo>
-        </InfoPanel>
+        <ColorButton onClick={() => setShowColorPicker(!showColorPicker)}>
+          <MdColorLens size={18} />
+          Couleur du marqueur
+        </ColorButton>
+
+        {showColorPicker && (
+          <ColorPickerContainer>
+            <ContextualWindowController 
+              isOpen={showColorPicker} 
+              toggleWindow={setShowColorPicker}
+              title="Couleur du marqueur"
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Couleur du marqueur</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                {predefinedColors.map((color, index) => (
+                  <div 
+                    key={index}
+                    style={{
+                      backgroundColor: color,
+                      width: '30px',
+                      height: '30px',
+                      borderRadius: '50%',
+                      cursor: 'pointer',
+                      border: markerColor === color ? '2px solid black' : '2px solid transparent'
+                    }}
+                    onClick={() => setMarkerColor(color)}
+                  />
+                ))}
+              </div>
+              <input 
+                type="color" 
+                value={markerColor}
+                onChange={(e) => setMarkerColor(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </ContextualWindowController>
+          </ColorPickerContainer>
+        )}
+
+        {showInfoPanel && (
+          <InfoPanel>
+            <ContextualWindowController
+              isOpen={showInfoPanel}
+              toggleWindow={toggleInfoPanel}
+              title="Votre localisation"
+            >
+              <h3>Votre localisation</h3>
+              
+              <SectionTitle>Informations géographiques</SectionTitle>
+              <LocationInfo>
+                <FaMapMarkerAlt size={16} color="#FF4136" />
+                <span>Quartier: {locationInfo.neighborhood}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdLocationCity size={16} color="#0074D9" />
+                <span>Ville: {locationInfo.city}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdOutlinePublic size={16} color="#2ECC40" />
+                <span>Pays: {locationInfo.country}</span>
+              </LocationInfo>
+              
+              <SectionTitle>Données techniques</SectionTitle>
+              <LocationInfo>
+                <MdMyLocation size={16} color={markerColor} />
+                <span>Latitude: {locationInfo.latitude}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdMyLocation size={16} color={markerColor} />
+                <span>Longitude: {locationInfo.longitude}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdTerrain size={16} color="#B10DC9" />
+                <span>Altitude: {locationInfo.altitude}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdSpeed size={16} color="#FF851B" />
+                <span>Vitesse: {locationInfo.speed}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdNetworkWifi size={16} color="#85144b" />
+                <span>Précision: {locationInfo.accuracy}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdNetworkWifi size={16} color="#3D9970" />
+                <span>Adresse IP: {locationInfo.ip}</span>
+              </LocationInfo>
+
+              {locationHistory.length > 0 && (
+                <HistoryContainer>
+                  <SectionTitle>
+                    <FaHistory size={16} color="#AAAAAA" />
+                    Historique des positions
+                  </SectionTitle>
+                  {locationHistory.map((item, index) => (
+                    <HistoryItem 
+                      key={item.id} 
+                      onClick={() => goToHistoricalPosition(item)}
+                    >
+                      {formatTime(item.timestamp)} - 
+                      Lat: {item.position.lat.toFixed(4)}, 
+                      Lng: {item.position.lng.toFixed(4)}
+                    </HistoryItem>
+                  ))}
+                </HistoryContainer>
+              )}
+            </ContextualWindowController>
+          </InfoPanel>
+        )}
 
         <ControlPanel>
           <Button onClick={centerOnLocation}>
             <MdMyLocation size={20} style={{ marginRight: '5px' }} />
             Ma position
+          </Button>
+          <Button onClick={() => togglePopup()}>
+            {isPopupOpen ? 'Fermer le popup' : 'Ouvrir le popup'}
+          </Button>
+          <Button onClick={() => toggleInfoPanel()}>
+            {showInfoPanel ? 'Masquer les infos' : 'Afficher les infos'}
           </Button>
         </ControlPanel>
       </MapWrapper>
