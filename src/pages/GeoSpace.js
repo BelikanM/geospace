@@ -45,6 +45,35 @@ const MapWrapper = styled.div`
     height: 100%;
     width: 100%;
   }
+  
+  /* Amélioration du style des popups */
+  .leaflet-popup-content-wrapper {
+    padding: 0;
+    overflow: hidden;
+  }
+  
+  .leaflet-popup-content {
+    margin: 0;
+    padding: 12px;
+    width: auto !important;
+    min-width: 200px;
+    max-width: 300px;
+  }
+  
+  /* Assurer que les popups ne cachent pas leur contenu */
+  .leaflet-popup-content > div {
+    position: relative;
+    padding-top: 5px;
+  }
+  
+  /* Style responsif pour les popups sur mobile */
+  @media (max-width: 768px) {
+    .leaflet-popup-content {
+      min-width: 150px;
+      max-width: 220px;
+      font-size: 0.9em;
+    }
+  }
 `;
 
 const ControlPanel = styled.div`
@@ -55,6 +84,12 @@ const ControlPanel = styled.div`
   z-index: 1000;
   display: flex;
   gap: 10px;
+  
+  @media (max-width: 768px) {
+    bottom: 10px;
+    width: 90%;
+    justify-content: center;
+  }
 `;
 
 const Button = styled.button`
@@ -68,6 +103,11 @@ const Button = styled.button`
   cursor: pointer;
   &:hover {
     background-color: #f0f0f0;
+  }
+  
+  @media (max-width: 768px) {
+    padding: 8px 12px;
+    font-size: 0.9em;
   }
 `;
 
@@ -83,6 +123,15 @@ const InfoPanel = styled.div`
   max-width: 300px;
   max-height: 80vh;
   overflow-y: auto;
+  
+  @media (max-width: 768px) {
+    max-width: 250px;
+    font-size: 0.9em;
+    top: auto;
+    bottom: 70px;
+    right: 10px;
+    max-height: 40vh;
+  }
 `;
 
 const UsersPanel = styled.div`
@@ -97,6 +146,14 @@ const UsersPanel = styled.div`
   max-width: 300px;
   max-height: 80vh;
   overflow-y: auto;
+  
+  @media (max-width: 768px) {
+    top: 10px;
+    left: 10px;
+    max-width: 85%;
+    max-height: 40vh;
+    font-size: 0.9em;
+  }
 `;
 
 const LocationInfo = styled.div`
@@ -200,6 +257,13 @@ const LogoutButton = styled.button`
   &:hover {
     background-color: #f0f0f0;
   }
+  
+  @media (max-width: 768px) {
+    padding: 8px;
+    font-size: 0.8em;
+    top: 10px;
+    left: 10px;
+  }
 `;
 
 const UsersButton = styled.button`
@@ -217,6 +281,13 @@ const UsersButton = styled.button`
   cursor: pointer;
   &:hover {
     background-color: #f0f0f0;
+  }
+  
+  @media (max-width: 768px) {
+    padding: 8px;
+    font-size: 0.8em;
+    top: 60px;
+    left: 10px;
   }
 `;
 
@@ -291,7 +362,10 @@ const PopupHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+  font-weight: bold;
+  font-size: 1.1em;
   position: relative;
+  padding-right: 20px; /* Espace pour le bouton de fermeture */
 `;
 
 const ColorPickerContainer = styled.div`
@@ -324,6 +398,13 @@ const ColorButton = styled.button`
   &:hover {
     background-color: #f0f0f0;
   }
+  
+  @media (max-width: 768px) {
+    padding: 8px;
+    font-size: 0.8em;
+    top: 110px;
+    left: 10px;
+  }
 `;
 
 // Nouveaux composants pour la barre de recherche et le filtre
@@ -342,6 +423,12 @@ const SearchContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
+  
+  @media (max-width: 768px) {
+    width: 90%;
+    top: 10px;
+    padding: 8px;
+  }
 `;
 
 const SearchInputContainer = styled.div`
@@ -359,6 +446,11 @@ const SearchInput = styled.input`
   border: none;
   outline: none;
   background: transparent;
+  
+  @media (max-width: 768px) {
+    padding: 8px 5px;
+    font-size: 0.9em;
+  }
 `;
 
 const SearchResults = styled.div`
@@ -368,6 +460,10 @@ const SearchResults = styled.div`
   background-color: white;
   box-shadow: ${props => props.isVisible ? '0 4px 8px rgba(0,0,0,0.1)' : 'none'};
   display: ${props => props.isVisible ? 'block' : 'none'};
+  
+  @media (max-width: 768px) {
+    max-height: 150px;
+  }
 `;
 
 const SearchResultItem = styled.div`
@@ -379,6 +475,11 @@ const SearchResultItem = styled.div`
   }
   &:last-child {
     border-bottom: none;
+  }
+  
+  @media (max-width: 768px) {
+    padding: 8px;
+    font-size: 0.9em;
   }
 `;
 
@@ -403,6 +504,21 @@ const FilterButton = styled.button`
   transition: all 0.2s;
   &:hover {
     background-color: ${props => props.active ? '#0055dd' : '#e5e5e5'};
+  }
+`;
+
+const StyledPopupContent = styled.div`
+  /* Le contenu du popup avec un style amélioré */
+  padding: 5px 0;
+  
+  p {
+    margin: 5px 0;
+    font-size: 0.9em;
+  }
+  
+  h3 {
+    margin: 0 0 10px 0;
+    font-size: 1em;
   }
 `;
 
@@ -761,20 +877,19 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
       <Popup 
         autoPan={true}
         closeButton={false}
+        className="custom-popup"
       >
-        <div>
-          <PopupHeader>
-            <h3>Votre position actuelle</h3>
-            <CloseButton onClick={() => togglePopup(false)}>
-              <MdClose size={20} />
-            </CloseButton>
-          </PopupHeader>
+        <StyledPopupContent>
+          <h3>Votre position actuelle</h3>
+          <CloseButton onClick={() => togglePopup(false)} style={{ top: '8px', right: '5px' }}>
+            <MdClose size={18} />
+          </CloseButton>
           <p>Latitude: {position.lat.toFixed(6)}</p>
           <p>Longitude: {position.lng.toFixed(6)}</p>
           {altitude !== null && <p>Altitude: {typeof altitude === 'number' ? `${altitude.toFixed(1)} m` : altitude}</p>}
           {speed !== null && <p>Vitesse: {typeof speed === 'number' ? `${(speed * 3.6).toFixed(1)} km/h` : speed}</p>}
           {currentUser && <p>Connecté en tant que: {currentUser.name || currentUser.email}</p>}
-        </div>
+        </StyledPopupContent>
       </Popup>
     </Marker>
   );
@@ -787,7 +902,7 @@ function UserMarker({ user, currentUserId, filterSettings }) {
   const markerColor = isCurrentUser ? "#0066ff" : "#FF4136";
   
   // Ne pas afficher de marqueur pour l'utilisateur actuel (déjà affiché par LocationMarker)
-  if (isCurrentUser) return null;
+   if (isCurrentUser) return null;
   
   // Filtrage des utilisateurs selon les paramètres
   if (filterSettings) {
@@ -816,16 +931,26 @@ function UserMarker({ user, currentUserId, filterSettings }) {
       position={position} 
       icon={userIcon}
       ref={markerRef}
+      eventHandlers={{
+        popupopen: () => {
+          markerRef.current.openPopup();
+        },
+        popupclose: () => {
+          markerRef.current.closePopup();
+        }
+      }}
     >
       <Popup 
         autoPan={true}
         closeButton={true}
+        className="custom-popup"
       >
-        <div>
-          <PopupHeader>
-            <h3>{user.displayName || "Utilisateur"}</h3>
-          </PopupHeader>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+        <StyledPopupContent>
+          <h3>{user.displayName || "Utilisateur"}</h3>
+          <p>Latitude: {user.location.latitude.toFixed(6)}</p>
+          <p>Longitude: {user.location.longitude.toFixed(6)}</p>
+          {user.location.altitude && <p>Altitude: {user.location.altitude.toFixed(1)} m</p>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
             {user.photoURL ? (
               <img 
                 src={user.photoURL} 
@@ -852,10 +977,7 @@ function UserMarker({ user, currentUserId, filterSettings }) {
               </div>
             </div>
           </div>
-          <p>Latitude: {user.location.latitude.toFixed(6)}</p>
-          <p>Longitude: {user.location.longitude.toFixed(6)}</p>
-          {user.location.altitude && <p>Altitude: {user.location.altitude.toFixed(1)} m</p>}
-        </div>
+        </StyledPopupContent>
       </Popup>
     </Marker>
   );
@@ -1094,7 +1216,6 @@ function GeoSpace() {
     }
   };
 
-  // Fonction pour
   // Fonction pour demander l'accès à la géolocalisation
   const requestLocationPermission = () => {
     if (navigator.geolocation) {
