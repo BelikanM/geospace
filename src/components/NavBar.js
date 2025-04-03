@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FaSearch, FaEnvelope, FaComments, FaBars, FaTimes } from 'react-icons/fa';
+import { FaBars, FaTimes, FaMapMarkedAlt, FaCloudSunRain, FaComments } from 'react-icons/fa';
 import { BiWorld } from 'react-icons/bi'; // Icône pour GeoSpace
 import './NavBar.css';
 
@@ -31,7 +31,7 @@ const NavBar = () => {
     <nav className={`navbar ${scrolled ? 'navbar-scrolled' : ''}`}>
       <div className="navbar-container">
         <Link to="/" className="navbar-logo">
-          <span className="logo-text">MonApp</span>
+          <span className="logo-text">GEOGABON</span>
         </Link>
 
         {/* Hamburger Icon */}
@@ -44,25 +44,25 @@ const NavBar = () => {
           <li className="nav-item">
             <Link to="/geospace" className="nav-link" onClick={() => setIsOpen(false)}>
               <BiWorld className="nav-icon" />
-              <span className="nav-text">GeoSpace</span>
+              <span className="nav-text">GEOSPACE</span>
             </Link>
           </li>
           <li className="nav-item">
-            <Link to="/recherche" className="nav-link" onClick={() => setIsOpen(false)}>
-              <FaSearch className="nav-icon" />
-              <span className="nav-text">Recherche</span>
+            <Link to="/cartographie" className="nav-link" onClick={() => setIsOpen(false)}>
+              <FaMapMarkedAlt className="nav-icon" />
+              <span className="nav-text">CARTOGRAPHIE</span>
             </Link>
           </li>
           <li className="nav-item">
-            <Link to="/contact" className="nav-link" onClick={() => setIsOpen(false)}>
-              <FaEnvelope className="nav-icon" />
-              <span className="nav-text">Contact</span>
+            <Link to="/meteo" className="nav-link" onClick={() => setIsOpen(false)}>
+              <FaCloudSunRain className="nav-icon" />
+              <span className="nav-text">METEO</span>
             </Link>
           </li>
           <li className="nav-item">
             <Link to="/chat" className="nav-link" onClick={() => setIsOpen(false)}>
               <FaComments className="nav-icon" />
-              <span className="nav-text">Chat</span>
+              <span className="nav-text">CHAT</span>
             </Link>
           </li>
         </ul>

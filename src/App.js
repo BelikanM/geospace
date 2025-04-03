@@ -1,10 +1,10 @@
 import React from 'react';
 import { BrowserRouter as Router, Switch, Route, Redirect } from 'react-router-dom';
 import NavBar from './components/NavBar';
-import GeoSpace from './pages/GeoSpace';
-import Recherche from './pages/Recherche';
-import Contact from './pages/Contact';
-import Chat from './pages/Chat';
+import GEOSPACE from './pages/GEOSPACE';
+import CARTOGRAPHIE from './pages/CARTOGRAPHIE';
+import METEO from './pages/METEO';
+import CHAT from './pages/CHAT';
 import Home from './pages/Home';
 import NotFound from './pages/NotFound';
 import './App.css';
@@ -17,10 +17,10 @@ function App() {
         <div className="content">
           <Switch>
             <Route exact path="/" component={Home} />
-            <Route path="/geospace" component={GeoSpace} />
-            <Route path="/recherche" component={Recherche} />
-            <Route path="/contact" component={Contact} />
-            <Route path="/chat" component={Chat} />
+            <Route path="/geospace" component={GEOSPACE} />
+            <Route path="/cartographie" component={CARTOGRAPHIE} />
+            <Route path="/meteo" component={METEO} />
+            <Route path="/chat" component={CHAT} />
             <Route path="/404" component={NotFound} />
             <Redirect to="/404" />
           </Switch>
