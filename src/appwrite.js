@@ -1,45 +1,21 @@
-import { Client, Account, Databases, Storage, ID } from 'appwrite';
+import { Client, Account, Databases, ID } from 'appwrite';
 
-// Appwrite configuration
+// Initialize Appwrite
 const client = new Client();
-
 client
-  .setEndpoint(process.env.REACT_APP_APPWRITE_ENDPOINT)
-  .setProject(process.env.REACT_APP_APPWRITE_PROJECT_ID);
+  .setEndpoint(process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1')
+  .setProject(process.env.REACT_APP_APPWRITE_PROJECT_ID || 'your-project-id');
 
-// Initialize services
-const account = new Account(client);
-const databases = new Databases(client);
-const storage = new Storage(client);
+// Initialize Appwrite Account service
+export const account = new Account(client);
 
-// Database constants
-const DATABASE_ID = process.env.REACT_APP_APPWRITE_DATABASE_ID;
-const COLLECTION_ID = process.env.REACT_APP_APPWRITE_COLLECTION_ID;
-const BUCKET_ID = process.env.REACT_APP_APPWRITE_BUCKET_ID;
+// Initialize Appwrite Database service
+export const databases = new Databases(client);
 
-// Auth functions
-export const createUser = async (email, password, name) => {
-  try {
-    const response = await account.create(ID.unique(), email, password, name);
-    if (response) {
-      await loginUser(email, password);
-    }
-    return response;
-  } catch (error) {
-    console.error('Error creating user:', error);
-    throw error;
-  }
-};
+export const DATABASE_ID = process.env.REACT_APP_APPWRITE_DATABASE_ID || 'your-database-id';
+export const COLLECTION_ID = process.env.REACT_APP_APPWRITE_COLLECTION_ID || 'your-collection-id';
 
-export const loginUser = async (email, password) => {
-  try {
-    return await account.createEmailSession(email, password);
-  } catch (error) {
-    console.error('Error logging in:', error);
-    throw error;
-  }
-};
-
+// Get current user
 export const getCurrentUser = async () => {
   try {
     return await account.get();
@@ -49,28 +25,19 @@ export const getCurrentUser = async () => {
   }
 };
 
-export const logoutUser = async () => {
+// Logout user
+export const logout = async () => {
   try {
-    return await account.deleteSession('current');
+    await account.deleteSession('current');
+    return true;
   } catch (error) {
     console.error('Error logging out:', error);
     throw error;
   }
 };
 
-// Google OAuth login
-export const loginWithGoogle = () => {
-  try {
-    const redirectUrl = window.location.origin; // Current URL as redirect
-    account.createOAuth2Session('google', redirectUrl, redirectUrl);
-  } catch (error) {
-    console.error('Error with Google login:', error);
-    throw error;
-  }
-};
-
-// Location data functions
-export const saveUserLocation = async (userId, location, locationInfo) => {
+// Save user location
+export const saveUserLocation = async (userId, latitude, longitude, altitude, speed, accuracy) => {
   try {
     return await databases.createDocument(
       DATABASE_ID,
@@ -78,11 +45,12 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
       ID.unique(),
       {
         user_id: userId,
-        latitude: location.lat,
-        longitude: location.lng,
-        neighborhood: locationInfo.neighborhood,
-        timestamp: new Date().toISOString(),
-        weather: locationInfo.weather || {}
+        latitude,
+        longitude,
+        altitude: altitude || null,
+        speed: speed || null,
+        accuracy: accuracy || null,
+        timestamp: new Date().toISOString()
       }
     );
   } catch (error) {
@@ -91,21 +59,77 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
   }
 };
 
-export const getUserLocations = async (userId) => {
+// Fonction pour enregistrer un lot de positions utilisateur
+export const saveUserLocationBatch = async (userId, locationBatch, totalDistance) => {
   try {
-    return await databases.listDocuments(
+    const currentDate = new Date().toISOString().split('T')[0]; // Format YYYY-MM-DD
+    
+    return await databases.createDocument(
       DATABASE_ID,
       COLLECTION_ID,
-      [
-        databases.queries.equal('user_id', userId)
-      ]
+      ID.unique(),
+      {
+        user_id: userId,
+        date: currentDate,
+        locations: JSON.stringify(locationBatch),
+        total_distance: totalDistance,
+        timestamp: new Date().toISOString()
+      }
     );
   } catch (error) {
-    console.error('Error getting locations:', error);
+    console.error('Error saving location batch:', error);
+    // Sauvegarder localement en cas d'échec pour réessayer plus tard
+    const failedBatches = JSON.parse(localStorage.getItem('failedLocationBatches') || '[]');
+    failedBatches.push({
+      userId,
+      locationBatch,
+      totalDistance,
+      timestamp: new Date().toISOString()
+    });
+    localStorage.setItem('failedLocationBatches', JSON.stringify(failedBatches));
     throw error;
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID };
+// Fonction pour retenter l'envoi des lots échoués
+export const retrySendFailedBatches = async () => {
+  const failedBatches = JSON.parse(localStorage.getItem('failedLocationBatches') || '[]');
+  if (failedBatches.length === 0) return;
+  
+  const successfulBatches = [];
+  
+  for (const batch of failedBatches) {
+    try {
+      await saveUserLocationBatch(batch.userId, batch.locationBatch, batch.totalDistance);
+      successfulBatches.push(batch);
+    } catch (error) {
+      console.error('Failed to resend batch:', error);
+    }
+  }
+  
+  // Retirer les lots envoyés avec succès
+  const remainingBatches = failedBatches.filter(batch => 
+    !successfulBatches.some(s => s.timestamp === batch.timestamp)
+  );
+  
+  localStorage.setItem('failedLocationBatches', JSON.stringify(remainingBatches));
+};
 
+// Get user locations
+export const getUserLocations = async (userId) => {
+  try {
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      COLLECTION_ID,
+      [
+        // Filter for the specific user
+        { field: 'user_id', value: userId }
+      ]
+    );
+    return response.documents;
+  } catch (error) {
+    console.error('Error fetching locations:', error);
+    throw error;
+  }
+};
 

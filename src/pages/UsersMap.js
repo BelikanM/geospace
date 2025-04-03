@@ -4,9 +4,10 @@ import L from 'leaflet';
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
 import { MdPerson, MdPhone, MdClose, MdEmail, MdGroup } from 'react-icons/md';
-import { databases, DATABASE_ID } from './appwrite';
+import { databases, DATABASE_ID, account } from './appwrite';
+import { ID, Query } from 'appwrite';
 
-// Styles pour le composant
+// Styles pour le composant (inchangés)
 const PopupHeader = styled.div`
   display: flex;
   justify-content: space-between;
@@ -97,19 +98,35 @@ const createUserIcon = (color = "#FF4136") => {
   });
 };
 
-// Collection pour les utilisateurs (à configurer dans Appwrite)
-const USERS_COLLECTION_ID = '67ec0ff5002cafd109d7'; // À remplacer par votre collection ID
+// Nouvelle collection ID
+const USERS_COLLECTION_ID = '67ec0ff5002cafd109d7';
 
 const UsersMap = () => {
   const [users, setUsers] = useState([]);
   const [showUsersPanel, setShowUsersPanel] = useState(false);
   const [openPopupId, setOpenPopupId] = useState(null);
   const userIcon = createUserIcon();
+  const [currentUser, setCurrentUser] = useState(null);
 
-  // Récupérer tous les utilisateurs depuis Appwrite
+  // Récupérer l'utilisateur actuellement connecté
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      try {
+        const user = await account.get();
+        setCurrentUser(user);
+      } catch (error) {
+        console.error('Utilisateur non connecté:', error);
+      }
+    };
+
+    getCurrentUser();
+  }, []);
+
+  // Récupérer les utilisateurs de la collection spécifiée
   useEffect(() => {
     const fetchUsers = async () => {
       try {
+        // Récupérer tous les utilisateurs de la collection
         const response = await databases.listDocuments(
           DATABASE_ID,
           USERS_COLLECTION_ID
@@ -121,6 +138,7 @@ const UsersMap = () => {
         );
         
         setUsers(usersWithLocation);
+        console.log('Utilisateurs récupérés:', usersWithLocation);
       } catch (error) {
         console.error('Erreur lors de la récupération des utilisateurs:', error);
       }
@@ -157,7 +175,7 @@ const UsersMap = () => {
       {/* Panneau d'affichage de la liste des utilisateurs */}
       <UsersPanel visible={showUsersPanel}>
         <PopupHeader>
-          <h3>Utilisateurs inscrits</h3>
+          <h3>Utilisateurs ({users.length})</h3>
           <CloseButton onClick={() => setShowUsersPanel(false)}>
             <MdClose size={20} />
           </CloseButton>
@@ -170,12 +188,14 @@ const UsersMap = () => {
             <div key={user.$id} style={{ marginBottom: '10px', padding: '5px', borderBottom: '1px solid #eee' }}>
               <UserInfo>
                 <MdPerson size={16} color="#FF4136" />
-                <span>{user.name}</span>
+                <span>{user.name || 'Utilisateur sans nom'}</span>
               </UserInfo>
-              <UserInfo>
-                <MdPhone size={16} color="#0074D9" />
-                <span>{user.phone || 'Non renseigné'}</span>
-              </UserInfo>
+              {user.phone && (
+                <UserInfo>
+                  <MdPhone size={16} color="#0074D9" />
+                  <span>{user.phone}</span>
+                </UserInfo>
+              )}
               <button 
                 onClick={() => toggleUserPopup(user.$id)}
                 style={{ 
@@ -211,19 +231,21 @@ const UsersMap = () => {
           >
             <div>
               <PopupHeader>
-                <h3>{user.name}</h3>
+                <h3>{user.name || 'Utilisateur'}</h3>
                 <CloseButton onClick={() => setOpenPopupId(null)}>
                   <MdClose size={20} />
                 </CloseButton>
               </PopupHeader>
               <UserInfo>
                 <MdPerson size={16} color="#FF4136" />
-                <span>Nom: {user.name}</span>
+                <span>Nom: {user.name || 'Non renseigné'}</span>
               </UserInfo>
-              <UserInfo>
-                <MdPhone size={16} color="#0074D9" />
-                <span>Téléphone: {user.phone || 'Non renseigné'}</span>
-              </UserInfo>
+              {user.phone && (
+                <UserInfo>
+                  <MdPhone size={16} color="#0074D9" />
+                  <span>Téléphone: {user.phone}</span>
+                </UserInfo>
+              )}
               {user.email && (
                 <UserInfo>
                   <MdEmail size={16} color="#2ECC40" />
@@ -240,5 +262,4 @@ const UsersMap = () => {
 };
 
 export default UsersMap;
-
 

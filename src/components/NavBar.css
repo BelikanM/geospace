@@ -6,18 +6,18 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: rgba(245, 245, 247, 0.8);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.05);
+  background-color: rgba(255, 165, 0, 0.25); /* Teinte orange plus visible */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 15px rgba(255, 140, 0, 0.2); /* Ombre plus prononcée */
   z-index: 1000;
   transition: all 0.3s ease-in-out;
 }
 
 .navbar-scrolled {
   height: 60px;
-  background-color: rgba(245, 245, 247, 0.9);
-  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.1);
+  background-color: rgba(255, 165, 0, 0.35); /* Orange encore plus opaque lors du défilement */
+  box-shadow: 0 2px 20px rgba(255, 140, 0, 0.25);
 }
 
 .navbar-container {
@@ -61,19 +61,75 @@
   align-items: center;
   color: #333;
   font-size: 1rem;
+  font-weight: 600; /* Texte plus gras */
   text-decoration: none;
   transition: all 0.2s ease-in-out;
-  padding: 0.5rem;
+  padding: 0.7rem 1rem; /* Padding augmenté */
   border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  background-color: rgba(255, 255, 255, 0.8); /* Fond blanc semi-transparent */
+  border: 2px solid #1e88e5; /* Bordure bleue visible */
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3); /* Ombre bleue */
+}
+
+/* Effet de scintillement bleu sur les bordures */
+.nav-link::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(33, 150, 243, 0), rgba(33, 150, 243, 0.8), rgba(33, 150, 243, 0));
+  animation: shineTop 3s infinite;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: -100%;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(33, 150, 243, 0), rgba(33, 150, 243, 0.8), rgba(33, 150, 243, 0));
+  animation: shineBottom 3s infinite;
+}
+
+@keyframes shineTop {
+  0% {
+    left: -100%;
+  }
+  50%, 100% {
+    left: 100%;
+  }
+}
+
+@keyframes shineBottom {
+  0% {
+    right: -100%;
+  }
+  50%, 100% {
+    right: 100%;
+  }
 }
 
 .nav-link:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: rgba(255, 140, 0, 0.2); /* Effet hover plus visible */
+  color: #e65100; /* Texte orange foncé au survol */
+  box-shadow: 0 0 10px rgba(33, 150, 243, 0.7); /* Lueur bleue plus intense au survol */
+  transform: translateY(-2px); /* Léger effet de soulèvement */
+}
+
+/* Effet de pulsation au survol */
+.nav-link:hover::before, .nav-link:hover::after {
+  animation-duration: 1.5s; /* Plus rapide au survol */
 }
 
 .nav-icon {
   font-size: 1.2rem;
   margin-right: 8px;
+  color: #1e88e5; /* Icônes en bleu */
 }
 
 .menu-icon {
@@ -81,6 +137,10 @@
   color: #333;
   font-size: 1.5rem;
   cursor: pointer;
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 2px solid #1e88e5;
 }
 
 /* Responsive Design */
@@ -101,21 +161,60 @@
 
   .nav-menu.active {
     left: 0;
-    background-color: rgba(245, 245, 247, 0.95);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background-color: rgba(255, 165, 0, 0.25); /* Fond orange plus visible pour le menu mobile */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-right: 1px solid rgba(255, 140, 0, 0.2); /* Bordure plus visible */
   }
 
   .nav-item {
-    margin: 0.5rem 0;
+    margin: 0.7rem 0;
     width: 100%;
   }
 
   .nav-link {
-    width: 100%;
+    width: 92%;
+    margin: 0 auto;
     padding: 1rem;
     display: flex;
     align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* Ajout d'effets latéraux pour le responsive */
+  .nav-link::before {
+    width: 2px;
+    height: 100%;
+    top: -100%;
+    left: 0;
+    animation: shineLeft 3s infinite;
+  }
+
+  .nav-link::after {
+    width: 2px;
+    height: 100%;
+    bottom: -100%;
+    right: 0;
+    animation: shineRight 3s infinite;
+  }
+
+  @keyframes shineLeft {
+    0% {
+      top: -100%;
+    }
+    50%, 100% {
+      top: 100%;
+    }
+  }
+
+  @keyframes shineRight {
+    0% {
+      bottom: -100%;
+    }
+    50%, 100% {
+      bottom: 100%;
+    }
   }
 
   .menu-icon {
@@ -132,9 +231,11 @@
 @keyframes fadeIn {
   from {
     opacity: 0;
+    transform: translateX(-10px);
   }
   to {
     opacity: 1;
+    transform: translateX(0);
   }
 }
 
