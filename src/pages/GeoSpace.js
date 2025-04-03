@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, MdClose, MdColorLens, MdLogout, MdPeople, MdPersonAdd } from 'react-icons/md';
+import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, 
+         MdClose, MdColorLens, MdLogout, MdPeople, MdPersonAdd, MdSearch, MdFilterList } from 'react-icons/md';
 import { FaMapMarkerAlt, FaGoogle, FaHistory, FaUser, FaUserFriends } from 'react-icons/fa';
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
@@ -325,6 +326,86 @@ const ColorButton = styled.button`
   }
 `;
 
+// Nouveaux composants pour la barre de recherche et le filtre
+const SearchContainer = styled.div`
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background-color: white;
+  padding: 10px;
+  border-radius: 5px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+  width: 70%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const SearchInputContainer = styled.div`
+  display: flex;
+  align-items: center;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 0 10px;
+  background-color: #f9f9f9;
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  padding: 10px;
+  border: none;
+  outline: none;
+  background: transparent;
+`;
+
+const SearchResults = styled.div`
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 5px;
+  background-color: white;
+  box-shadow: ${props => props.isVisible ? '0 4px 8px rgba(0,0,0,0.1)' : 'none'};
+  display: ${props => props.isVisible ? 'block' : 'none'};
+`;
+
+const SearchResultItem = styled.div`
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  &:hover {
+    background-color: #f5f5f5;
+  }
+  &:last-child {
+    border-bottom: none;
+  }
+`;
+
+const FilterContainer = styled.div`
+  display: ${props => props.isVisible ? 'flex' : 'none'};
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+`;
+
+const FilterButton = styled.button`
+  background-color: ${props => props.active ? '#0066ff' : '#f5f5f5'};
+  color: ${props => props.active ? 'white' : 'black'};
+  border: 1px solid #ddd;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 0.8em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s;
+  &:hover {
+    background-color: ${props => props.active ? '#0055dd' : '#e5e5e5'};
+  }
+`;
+
 // Sous-composant pour gérer l'ouverture/fermeture des fenêtres contextuelles
 const ContextualWindowController = ({ isOpen, toggleWindow, children, title }) => {
   return (
@@ -377,6 +458,145 @@ const createCustomIcon = (color = "#0066ff", isUser = false, photoURL = null) =>
     iconAnchor: [17, 17]
   });
 };
+
+// Composant de recherche et zoom sur la carte
+function SearchAndFilter({ map, onLocationSelect }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [showResults, setShowResults] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    online: false,
+    offline: false,
+    nearMe: false
+  });
+
+  // Effectuer la recherche de lieux
+  useEffect(() => {
+    if (!searchQuery || searchQuery.length < 3) {
+      setSearchResults([]);
+      return;
+    }
+
+    const fetchLocations = async () => {
+      try {
+        const response = await axios.get(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery}&limit=5`
+        );
+        setSearchResults(response.data);
+        setShowResults(true);
+      } catch (error) {
+        console.error("Erreur lors de la recherche:", error);
+        setSearchResults([]);
+      }
+    };
+
+    // Imposer un délai pour éviter trop de requêtes pendant la frappe
+    const timeoutId = setTimeout(() => {
+      fetchLocations();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const handleLocationSelect = (location) => {
+    const { lat, lon, display_name } = location;
+    if (map && lat && lon) {
+      map.setView([lat, lon], 14);
+      if (onLocationSelect) {
+        onLocationSelect({
+          lat: parseFloat(lat),
+          lng: parseFloat(lon),
+          name: display_name
+        });
+      }
+    }
+    setShowResults(false);
+    setSearchQuery('');
+  };
+
+  const toggleFilter = (filterName) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      [filterName]: !prev[filterName]
+    }));
+  };
+
+  return (
+    <SearchContainer>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <SearchInputContainer>
+          <MdSearch size={20} color="#666" />
+          <SearchInput
+            type="text"
+            placeholder="Rechercher une zone, un quartier..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => searchResults.length > 0 && setShowResults(true)}
+          />
+          {searchQuery && (
+            <MdClose 
+              size={18} 
+              color="#666" 
+              style={{ cursor: 'pointer' }} 
+              onClick={() => {
+                setSearchQuery('');
+                setSearchResults([]);
+                setShowResults(false);
+              }}
+            />
+          )}
+        </SearchInputContainer>
+        <Button 
+          onClick={() => setShowFilters(!showFilters)} 
+          style={{ marginLeft: '10px', padding: '10px' }}
+        >
+          <MdFilterList size={20} color={showFilters ? '#0066ff' : '#666'} />
+        </Button>
+      </div>
+
+      <SearchResults isVisible={showResults && searchResults.length > 0}>
+        {searchResults.map((result, index) => (
+          <SearchResultItem 
+            key={index} 
+            onClick={() => handleLocationSelect(result)}
+          >
+            <div style={{ fontWeight: 'bold' }}>
+              {result.display_name.split(',')[0]}
+            </div>
+            <div style={{ fontSize: '0.8em', color: '#666' }}>
+              {result.display_name}
+            </div>
+          </SearchResultItem>
+        ))}
+      </SearchResults>
+
+      <FilterContainer isVisible={showFilters}>
+        <FilterButton 
+          active={activeFilters.online}
+          onClick={() => toggleFilter('online')}
+        >
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#4caf50' }}></div>
+          En ligne
+        </FilterButton>
+        <FilterButton 
+          active={activeFilters.offline}
+          onClick={() => toggleFilter('offline')}
+        >
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#9e9e9e' }}></div>
+          Hors ligne
+        </FilterButton>
+        <FilterButton 
+          active={activeFilters.nearMe}
+          onClick={() => toggleFilter('nearMe')}
+        >
+          <MdMyLocation size={14} />
+          Près de moi
+        </FilterButton>
+      </FilterContainer>
+    </SearchContainer>
+  );
+}
 
 // Composant pour suivre la position actuelle
 function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOpen, togglePopup, currentUser }) {
@@ -561,13 +781,32 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
 }
 
 // Composant pour afficher un utilisateur sur la carte
-function UserMarker({ user, currentUserId }) {
+function UserMarker({ user, currentUserId, filterSettings }) {
   const isCurrentUser = user.userId === currentUserId;
   const markerRef = useRef(null);
   const markerColor = isCurrentUser ? "#0066ff" : "#FF4136";
   
   // Ne pas afficher de marqueur pour l'utilisateur actuel (déjà affiché par LocationMarker)
   if (isCurrentUser) return null;
+  
+  // Filtrage des utilisateurs selon les paramètres
+  if (filterSettings) {
+    // Filtre en ligne/hors ligne
+    if (filterSettings.online && !user.isOnline) return null;
+    if (filterSettings.offline && user.isOnline) return null;
+    
+    // Filtre "près de moi" - nécessite de calculer la distance
+    if (filterSettings.nearMe && filterSettings.userPosition) {
+      const distance = calculateDistance(
+        filterSettings.userPosition.lat,
+        filterSettings.userPosition.lng,
+        user.location.latitude,
+        user.location.longitude
+      );
+      // Considérer "près de moi" comme étant à moins de 5 km
+      if (distance > 5) return null;
+    }
+  }
   
   const position = [user.location.latitude, user.location.longitude];
   const userIcon = createCustomIcon(markerColor, true, user.photoURL);
@@ -622,6 +861,37 @@ function UserMarker({ user, currentUserId }) {
   );
 }
 
+// Fonction pour calculer la distance entre deux points géographiques
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Rayon de la Terre en kilomètres
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Convertir degrés en radians
+function toRad(degrees) {
+  return degrees * Math.PI / 180;
+}
+
+// Composant pour accéder à la carte depuis les sous-composants enfants
+function MapController({ children, onMapReady }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (onMapReady) {
+      onMapReady(map);
+    }
+  }, [map, onMapReady]);
+  
+  return <>{children}</>;
+}
+
 function GeoSpace() {
   const [mapCenter, setMapCenter] = useState([48.8566, 2.3522]); // Paris par défaut
   const [zoom, setZoom] = useState(13);
@@ -647,6 +917,14 @@ function GeoSpace() {
   const [locationHistory, setLocationHistory] = useState([]);
   const [userIp, setUserIp] = useState('');
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [leafletMap, setLeafletMap] = useState(null);
+  const [userPosition, setUserPosition] = useState(null);
+  const [filterSettings, setFilterSettings] = useState({
+    online: false,
+    offline: false,
+    nearMe: false,
+    userPosition: null
+  });
   
   // Vérifier l'état de l'authentification au démarrage
   useEffect(() => {
@@ -677,6 +955,16 @@ function GeoSpace() {
       clearInterval(interval);
     };
   }, []);
+  
+  // Mettre à jour les filtres quand la position de l'utilisateur change
+  useEffect(() => {
+    if (userPosition) {
+      setFilterSettings(prev => ({
+        ...prev,
+        userPosition
+      }));
+    }
+  }, [userPosition]);
   
   // Fonction pour récupérer les utilisateurs en ligne
   const fetchOnlineUsers = async () => {
@@ -806,6 +1094,7 @@ function GeoSpace() {
     }
   };
 
+  // Fonction pour
   // Fonction pour demander l'accès à la géolocalisation
   const requestLocationPermission = () => {
     if (navigator.geolocation) {
@@ -816,6 +1105,7 @@ function GeoSpace() {
           setZoom(16);
           setPermissionRequested(false);
           setIsPopupOpen(true); // Ouvrir le popup après obtention de la position
+          setUserPosition({ lat: latitude, lng: longitude });
           // Récupérer les informations de localisation
           fetchLocationDetails(latitude, longitude, altitude, speed, accuracy);
         },
@@ -929,27 +1219,38 @@ function GeoSpace() {
 
       <MapWrapper>
         <MapContainer center={mapCenter} zoom={zoom} scrollWheelZoom={true}>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <LocationMarker 
-            onLocationFound={(latLng) => console.log("Position trouvée sur la carte", latLng)} 
-            onNewPosition={(posData) => console.log("Nouvelle position détectée", posData)}
-            markerColor={markerColor}
-            isPopupOpen={isPopupOpen}
-            togglePopup={togglePopup}
-            currentUser={currentUser}
-          />
-          {onlineUsers.map(user => (
-            <UserMarker 
-              key={user.userId} 
-              user={user} 
-              currentUserId={currentUser?.$id || ''}
+          <MapController onMapReady={setLeafletMap}>
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-          ))}
+            <LocationMarker 
+              onLocationFound={(latLng) => console.log("Position trouvée sur la carte", latLng)} 
+              onNewPosition={(posData) => {
+                console.log("Nouvelle position détectée", posData);
+                setUserPosition(posData.position);
+              }}
+              markerColor={markerColor}
+              isPopupOpen={isPopupOpen}
+              togglePopup={togglePopup}
+              currentUser={currentUser}
+            />
+            {onlineUsers.map(user => (
+              <UserMarker 
+                key={user.userId} 
+                user={user} 
+                currentUserId={currentUser?.$id || ''}
+                filterSettings={filterSettings}
+              />
+            ))}
+          </MapController>
         </MapContainer>
       </MapWrapper>
+
+      <SearchAndFilter 
+        map={leafletMap} 
+        onLocationSelect={setMapCenter}
+      />
 
       <ColorButton onClick={() => setShowColorPicker(!showColorPicker)}>
         <MdColorLens size={18} />
