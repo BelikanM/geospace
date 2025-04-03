@@ -1,4 +1,4 @@
-import { Client, Account, Databases, Storage, ID } from 'appwrite';
+import { Client, Account, Databases, Storage, ID} from 'appwrite';
 
 // Appwrite configuration avec valeurs par défaut
 const AppwriteConfig = {
