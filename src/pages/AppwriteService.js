@@ -1,4 +1,4 @@
-import { Client, Account, Databases, Storage,COLLECTION_ID_USERS, ID} from 'appwrite';
+import { Client, Account, Databases, Storage, ID } from 'appwrite';
 
 // Appwrite configuration avec valeurs par défaut
 const AppwriteConfig = {
@@ -90,9 +90,13 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
         user_id: userId,
         latitude: location.lat,
         longitude: location.lng,
-        neighborhood: locationInfo.neighborhood,
-        timestamp: new Date().toISOString(),
-        weather: locationInfo.weather || {}
+        altitude: locationInfo.altitude || 0,
+        magnetometer: locationInfo.magnetometer || { x: 0, y: 0, z: 0 },
+        neighborhood: locationInfo.neighborhood || '',
+        city: locationInfo.city || '',
+        country: locationInfo.country || '',
+        ip_address: locationInfo.ip_address || '',
+        timestamp: new Date().toISOString()
       }
     );
   } catch (error) {
@@ -116,6 +120,23 @@ export const getUserLocations = async (userId) => {
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID,ID };
+export const getRecentLocations = async () => {
+  try {
+    const now = new Date();
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+    
+    return await databases.listDocuments(
+      DATABASE_ID,
+      COLLECTION_ID,
+      [
+        databases.queries.greaterThan('timestamp', tenMinutesAgo)
+      ]
+    );
+  } catch (error) {
+    console.error('Error getting recent locations:', error);
+    throw error;
+  }
+};
 
+export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID };
 

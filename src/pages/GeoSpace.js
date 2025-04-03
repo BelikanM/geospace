@@ -7,27 +7,25 @@ import { FaMapMarkerAlt, FaGoogle, FaHistory, FaUser, FaUserFriends } from 'reac
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
 import axios from 'axios';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, addDoc, updateDoc, doc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { Client, Account, Databases, Query, ID } from 'appwrite';
 
-// Initialisation de Firebase
-// Note: Vous devrez configurer votre propre app Firebase et ajouter les clés appropriées
-import { initializeApp } from 'firebase/app';
-
-const firebaseConfig = {
-  // Ajoutez votre configuration Firebase ici
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+// Appwrite configuration
+const AppwriteConfig = {
+  endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
+  projectId: process.env.REACT_APP_APPWRITE_PROJECT_ID || '67bb24ad002378e79e38',
+  databaseId: process.env.REACT_APP_APPWRITE_DATABASE_ID || '67bb32ca00157be0d0a2',
+  usersCollectionId: process.env.REACT_APP_APPWRITE_USERS_COLLECTION_ID || '67ec0ff5002cafd109d7',
+  locationsCollectionId: process.env.REACT_APP_APPWRITE_LOCATIONS_COLLECTION_ID || '67ec1023001e909ee0a3'
 };
 
-// Initialiser Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Initialize Appwrite
+const client = new Client();
+client
+  .setEndpoint(AppwriteConfig.endpoint)
+  .setProject(AppwriteConfig.projectId);
+
+const account = new Account(client);
+const databases = new Databases(client);
 
 // Styles pour la page
 const GeoSpaceContainer = styled.div`
@@ -416,7 +414,7 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
             };
             onNewPosition(positionData);
             
-            // Si l'utilisateur est connecté, mettre à jour sa position dans Firestore
+            // Si l'utilisateur est connecté, mettre à jour sa position dans Appwrite
             if (currentUser) {
               updateUserLocation(positionData);
             }
@@ -440,47 +438,69 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
     };
   }, [map, onLocationFound, onNewPosition, currentUser]);
 
-  // Fonction pour mettre à jour la position de l'utilisateur dans Firestore
+  // Fonction pour mettre à jour la position de l'utilisateur dans Appwrite
   const updateUserLocation = async (positionData) => {
     try {
       // Vérifier si l'utilisateur existe déjà dans la collection "users"
-      const usersRef = collection(db, "users");
-      const q = query(usersRef, where("uid", "==", currentUser.uid));
-      const querySnapshot = await getDocs(q);
+      const response = await databases.listDocuments(
+        AppwriteConfig.databaseId,
+        AppwriteConfig.usersCollectionId,
+        [
+          Query.equal("userId", currentUser.$id)
+        ]
+      );
       
-      if (!querySnapshot.empty) {
+      const userData = {
+        userId: currentUser.$id,
+        displayName: currentUser.name || "Utilisateur",
+        email: currentUser.email,
+        location: {
+          latitude: positionData.position.lat,
+          longitude: positionData.position.lng,
+          altitude: positionData.altitude,
+          speed: positionData.speed,
+          accuracy: positionData.accuracy,
+          lastUpdated: new Date().toISOString()
+        },
+        isOnline: true
+      };
+      
+      if (response.documents.length > 0) {
         // L'utilisateur existe, mettre à jour sa position
-        const userDoc = querySnapshot.docs[0];
-        await updateDoc(doc(db, "users", userDoc.id), {
-          location: {
-            latitude: positionData.position.lat,
-            longitude: positionData.position.lng,
-            altitude: positionData.altitude,
-            speed: positionData.speed,
-            accuracy: positionData.accuracy,
-            lastUpdated: new Date().toISOString()
-          },
-          isOnline: true
-        });
+        await databases.updateDocument(
+          AppwriteConfig.databaseId,
+          AppwriteConfig.usersCollectionId,
+          response.documents[0].$id,
+          userData
+        );
       } else {
         // L'utilisateur n'existe pas encore, l'ajouter
-        await addDoc(collection(db, "users"), {
-          uid: currentUser.uid,
-          displayName: currentUser.displayName || "Utilisateur",
-          email: currentUser.email,
-          photoURL: currentUser.photoURL,
-          location: {
-            latitude: positionData.position.lat,
-            longitude: positionData.position.lng,
-            altitude: positionData.altitude,
-            speed: positionData.speed,
-            accuracy: positionData.accuracy,
-            lastUpdated: new Date().toISOString()
-          },
-          isOnline: true,
-          createdAt: new Date().toISOString()
-        });
+        await databases.createDocument(
+          AppwriteConfig.databaseId,
+          AppwriteConfig.usersCollectionId,
+          ID.unique(),
+          {
+            ...userData,
+            createdAt: new Date().toISOString()
+          }
+        );
       }
+      
+      // Enregistrer également l'historique de position
+      await databases.createDocument(
+        AppwriteConfig.databaseId,
+        AppwriteConfig.locationsCollectionId,
+        ID.unique(),
+        {
+          userId: currentUser.$id,
+          latitude: positionData.position.lat,
+          longitude: positionData.position.lng,
+          altitude: positionData.altitude,
+          speed: positionData.speed,
+          accuracy: positionData.accuracy,
+          timestamp: new Date().toISOString()
+        }
+      );
     } catch (error) {
       console.error("Erreur lors de la mise à jour de la position:", error);
     }
@@ -533,7 +553,7 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
           <p>Longitude: {position.lng.toFixed(6)}</p>
           {altitude !== null && <p>Altitude: {typeof altitude === 'number' ? `${altitude.toFixed(1)} m` : altitude}</p>}
           {speed !== null && <p>Vitesse: {typeof speed === 'number' ? `${(speed * 3.6).toFixed(1)} km/h` : speed}</p>}
-          {currentUser && <p>Connecté en tant que: {currentUser.displayName || currentUser.email}</p>}
+          {currentUser && <p>Connecté en tant que: {currentUser.name || currentUser.email}</p>}
         </div>
       </Popup>
     </Marker>
@@ -542,7 +562,7 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
 
 // Composant pour afficher un utilisateur sur la carte
 function UserMarker({ user, currentUserId }) {
-  const isCurrentUser = user.uid === currentUserId;
+  const isCurrentUser = user.userId === currentUserId;
   const markerRef = useRef(null);
   const markerColor = isCurrentUser ? "#0066ff" : "#FF4136";
   
@@ -628,108 +648,98 @@ function GeoSpace() {
   const [userIp, setUserIp] = useState('');
   const [onlineUsers, setOnlineUsers] = useState([]);
   
-  // Surveiller l'état de l'authentification
+  // Vérifier l'état de l'authentification au démarrage
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUser(user);
-        setIsAuthenticated(true);
-        
-        // Ajout ou mise à jour de l'utilisateur dans Firestore
-        const addUserToFirestore = async () => {
-          try {
-            const usersRef = collection(db, "users");
-            const q = query(usersRef, where("uid", "==", user.uid));
-            const querySnapshot = await getDocs(q);
-            
-            if (querySnapshot.empty) {
-              // Première connexion, ajouter l'utilisateur
-              await addDoc(collection(db, "users"), {
-                uid: user.uid,
-                displayName: user.displayName || "Utilisateur",
-                email: user.email,
-                photoURL: user.photoURL,
-                isOnline: true,
-                createdAt: new Date().toISOString(),
-                lastLogin: new Date().toISOString()
-              });
-            } else {
-              // Connexion d'un utilisateur existant, mettre à jour son statut
-              const userDoc = querySnapshot.docs[0];
-              await updateDoc(doc(db, "users", userDoc.id), {
-                lastLogin: new Date().toISOString(),
-                isOnline: true,
-                photoURL: user.photoURL, // Mettre à jour la photo au cas où elle a changé
-                displayName: user.displayName // Mettre à jour le nom au cas où il a changé
-              });
-            }
-          } catch (error) {
-            console.error("Erreur lors de l'ajout/mise à jour de l'utilisateur:", error);
-          }
-        };
-        
-        addUserToFirestore();
-        setPermissionRequested(true);
-      } else {
+    const checkCurrentUser = async () => {
+      try {
+        const user = await account.get();
+        if (user) {
+          setCurrentUser(user);
+          setIsAuthenticated(true);
+          setPermissionRequested(true);
+          
+          // Mettre à jour le statut de l'utilisateur dans la base de données
+          updateUserStatus(user.$id, true);
+        }
+      } catch (error) {
+        console.log('Not authenticated yet');
         setCurrentUser(null);
         setIsAuthenticated(false);
       }
-    });
-    
-    // Nettoyer l'écouteur lors du démontage du composant
-    return () => unsubscribe();
-  }, []);
-  
-  // Surveiller la collection des utilisateurs pour les mises à jour en temps réel
-  useEffect(() => {
-    if (isAuthenticated) {
-      const usersRef = collection(db, "users");
-      const unsubscribe = onSnapshot(usersRef, (snapshot) => {
-        const usersData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })).filter(user => user.location); // Ne garder que les utilisateurs avec une position
-        
-        setOnlineUsers(usersData);
-      });
-      
-      return () => unsubscribe();
-    }
-  }, [isAuthenticated]);
-  
-  // Mettre à jour le statut hors ligne au départ
-  useEffect(() => {
-    const updateUserStatus = async () => {
-      if (currentUser) {
-        try {
-          const usersRef = collection(db, "users");
-          const q = query(usersRef, where("uid", "==", currentUser.uid));
-          const querySnapshot = await getDocs(q);
-          
-          if (!querySnapshot.empty) {
-            const userDoc = querySnapshot.docs[0];
-            
-            // Mettre à jour le statut en ligne
-            await updateDoc(doc(db, "users", userDoc.id), {
-              isOnline: true
-            });
-            
-            // Configurer la mise à jour du statut hors ligne lors de la fermeture
-            window.addEventListener('beforeunload', async () => {
-              await updateDoc(doc(db, "users", userDoc.id), {
-                isOnline: false,
-                lastSeen: new Date().toISOString()
-              });
-            });
-          }
-        } catch (error) {
-          console.error("Erreur lors de la mise à jour du statut:", error);
-        }
-      }
     };
     
-    updateUserStatus();
-  }, [currentUser]);
+    checkCurrentUser();
+    
+    // Créer un intervalle pour récupérer les utilisateurs
+    const interval = setInterval(fetchOnlineUsers, 10000); // Toutes les 10 secondes
+    
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+  
+  // Fonction pour récupérer les utilisateurs en ligne
+  const fetchOnlineUsers = async () => {
+    if (!isAuthenticated) return;
+    
+    try {
+      const response = await databases.listDocuments(
+        AppwriteConfig.databaseId,
+        AppwriteConfig.usersCollectionId,
+        [
+          Query.isNotNull("location")
+        ]
+      );
+      
+      setOnlineUsers(response.documents);
+    } catch (error) {
+      console.error("Erreur lors de la récupération des utilisateurs:", error);
+    }
+  };
+  
+  // Mettre à jour le statut de l'utilisateur dans la base de données
+  const updateUserStatus = async (userId, isOnline) => {
+    try {
+      // Vérifier si l'utilisateur existe déjà
+      const response = await databases.listDocuments(
+        AppwriteConfig.databaseId,
+        AppwriteConfig.usersCollectionId,
+        [
+          Query.equal("userId", userId)
+        ]
+      );
+      
+      if (response.documents.length > 0) {
+        // L'utilisateur existe, mettre à jour
+        await databases.updateDocument(
+          AppwriteConfig.databaseId,
+          AppwriteConfig.usersCollectionId,
+          response.documents[0].$id,
+          {
+            isOnline: isOnline,
+            lastSeen: new Date().toISOString()
+          }
+        );
+      } else if (isOnline && currentUser) {
+        // L'utilisateur n'existe pas et se connecte, le créer
+        await databases.createDocument(
+          AppwriteConfig.databaseId,
+          AppwriteConfig.usersCollectionId,
+          ID.unique(),
+          {
+            userId: userId,
+            displayName: currentUser.name || "Utilisateur",
+            email: currentUser.email,
+            isOnline: true,
+            createdAt: new Date().toISOString(),
+            lastSeen: new Date().toISOString()
+          }
+        );
+      }
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour du statut:", error);
+    }
+  };
   
   // Récupérer l'adresse IP de l'utilisateur au démarrage
   useEffect(() => {
@@ -746,16 +756,34 @@ function GeoSpace() {
     fetchUserIp();
   }, []);
 
+  // Mettre à jour la liste des utilisateurs en ligne quand l'état d'authentification change
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchOnlineUsers();
+      
+      // Configurer l'événement beforeunload pour mettre à jour le statut
+      const handleBeforeUnload = () => {
+        if (currentUser) {
+          updateUserStatus(currentUser.$id, false);
+        }
+      };
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        if (currentUser) {
+          updateUserStatus(currentUser.$id, false);
+        }
+      };
+    }
+  }, [isAuthenticated, currentUser]);
+
   // Fonction pour l'authentification Google
-  const handleGoogleAuth = async () => {
+  const handleGoogleAuth = () => {
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      // L'utilisateur est maintenant connecté
-      setCurrentUser(result.user);
-      setIsAuthenticated(true);
-      // Après l'authentification, demander la permission de localisation
-      setPermissionRequested(true);
+      const redirectUrl = window.location.origin;
+      account.createOAuth2Session('google', redirectUrl, redirectUrl);
     } catch (error) {
       console.error("Erreur d'authentification Google:", error);
       alert("Échec de la connexion. Veuillez réessayer.");
@@ -767,20 +795,10 @@ function GeoSpace() {
     try {
       // Mettre à jour le statut en ligne avant la déconnexion
       if (currentUser) {
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("uid", "==", currentUser.uid));
-        const querySnapshot = await getDocs(q);
-        
-        if (!querySnapshot.empty) {
-          const userDoc = querySnapshot.docs[0];
-          await updateDoc(doc(db, "users", userDoc.id), {
-            isOnline: false,
-            lastSeen: new Date().toISOString()
-          });
-        }
+        await updateUserStatus(currentUser.$id, false);
       }
       
-      await signOut(auth);
+      await account.deleteSession('current');
       setIsAuthenticated(false);
       setCurrentUser(null);
     } catch (error) {
@@ -925,9 +943,9 @@ function GeoSpace() {
           />
           {onlineUsers.map(user => (
             <UserMarker 
-              key={user.uid} 
+              key={user.userId} 
               user={user} 
-              currentUserId={currentUser?.uid || ''}
+              currentUserId={currentUser?.$id || ''}
             />
           ))}
         </MapContainer>
@@ -993,7 +1011,11 @@ function GeoSpace() {
         <UsersPanel>
           <h3>Utilisateurs connectés</h3>
           {onlineUsers.map(user => (
-            <UserItem key={user.uid} isCurrentUser={user.uid === currentUser.uid} onClick={() => console.log(user)}>
+            <UserItem 
+              key={user.userId} 
+              isCurrentUser={user.userId === currentUser?.$id}
+              onClick={() => console.log(user)}
+            >
               <UserAvatar photoURL={user.photoURL}>
                 {!user.photoURL && <FaUser />}
               </UserAvatar>
