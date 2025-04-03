@@ -2,33 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, 
-         MdClose, MdColorLens, MdLogout, MdPeople, MdPersonAdd, MdSearch, MdFilterList } from 'react-icons/md';
-import { FaMapMarkerAlt, FaGoogle, FaHistory, FaUser, FaUserFriends } from 'react-icons/fa';
+import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, MdClose, MdColorLens, MdLogout } from 'react-icons/md';
+import { FaMapMarkerAlt, FaGoogle, FaHistory } from 'react-icons/fa';
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
 import axios from 'axios';
-import { Client, Account, Databases, Query, ID } from 'appwrite';
+import UsersMap from './UsersMap'; // Importer le nouveau composant
+import { loginWithGoogle, getCurrentUser, logoutUser, saveUserLocation } from './appwrite'; // Utiliser les fonctions d'authentification d'Appwrite
 
-// Appwrite configuration
-const AppwriteConfig = {
-  endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
-  projectId: process.env.REACT_APP_APPWRITE_PROJECT_ID || '67bb24ad002378e79e38',
-  databaseId: process.env.REACT_APP_APPWRITE_DATABASE_ID || '67bb32ca00157be0d0a2',
-  usersCollectionId: process.env.REACT_APP_APPWRITE_USERS_COLLECTION_ID || '67ec0ff5002cafd109d7',
-  locationsCollectionId: process.env.REACT_APP_APPWRITE_LOCATIONS_COLLECTION_ID || '67ec1023001e909ee0a3'
-};
-
-// Initialize Appwrite
-const client = new Client();
-client
-  .setEndpoint(AppwriteConfig.endpoint)
-  .setProject(AppwriteConfig.projectId);
-
-const account = new Account(client);
-const databases = new Databases(client);
-
-// Styles pour la page
+// Styles pour la page (inchangés)
 const GeoSpaceContainer = styled.div`
   height: 100vh;
   width: 100%;
@@ -45,35 +27,6 @@ const MapWrapper = styled.div`
     height: 100%;
     width: 100%;
   }
-  
-  /* Amélioration du style des popups */
-  .leaflet-popup-content-wrapper {
-    padding: 0;
-    overflow: hidden;
-  }
-  
-  .leaflet-popup-content {
-    margin: 0;
-    padding: 12px;
-    width: auto !important;
-    min-width: 200px;
-    max-width: 300px;
-  }
-  
-  /* Assurer que les popups ne cachent pas leur contenu */
-  .leaflet-popup-content > div {
-    position: relative;
-    padding-top: 5px;
-  }
-  
-  /* Style responsif pour les popups sur mobile */
-  @media (max-width: 768px) {
-    .leaflet-popup-content {
-      min-width: 150px;
-      max-width: 220px;
-      font-size: 0.9em;
-    }
-  }
 `;
 
 const ControlPanel = styled.div`
@@ -84,12 +37,6 @@ const ControlPanel = styled.div`
   z-index: 1000;
   display: flex;
   gap: 10px;
-  
-  @media (max-width: 768px) {
-    bottom: 10px;
-    width: 90%;
-    justify-content: center;
-  }
 `;
 
 const Button = styled.button`
@@ -103,11 +50,6 @@ const Button = styled.button`
   cursor: pointer;
   &:hover {
     background-color: #f0f0f0;
-  }
-  
-  @media (max-width: 768px) {
-    padding: 8px 12px;
-    font-size: 0.9em;
   }
 `;
 
@@ -123,37 +65,6 @@ const InfoPanel = styled.div`
   max-width: 300px;
   max-height: 80vh;
   overflow-y: auto;
-  
-  @media (max-width: 768px) {
-    max-width: 250px;
-    font-size: 0.9em;
-    top: auto;
-    bottom: 70px;
-    right: 10px;
-    max-height: 40vh;
-  }
-`;
-
-const UsersPanel = styled.div`
-  position: absolute;
-  top: 10px;
-  left: 70px;
-  z-index: 1000;
-  background-color: white;
-  padding: 15px;
-  border-radius: 5px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
-  max-width: 300px;
-  max-height: 80vh;
-  overflow-y: auto;
-  
-  @media (max-width: 768px) {
-    top: 10px;
-    left: 10px;
-    max-width: 85%;
-    max-height: 40vh;
-    font-size: 0.9em;
-  }
 `;
 
 const LocationInfo = styled.div`
@@ -161,43 +72,6 @@ const LocationInfo = styled.div`
   display: flex;
   align-items: center;
   gap: 5px;
-`;
-
-const UserItem = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  margin-bottom: 5px;
-  border-radius: 4px;
-  background-color: ${props => props.isCurrentUser ? '#e6f7ff' : '#f5f5f5'};
-  font-size: 0.9em;
-  cursor: pointer;
-  &:hover {
-    background-color: ${props => props.isCurrentUser ? '#cceeff' : '#e0e0e0'};
-  }
-`;
-
-const UserAvatar = styled.div`
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background-color: #ddd;
-  background-image: ${props => props.photoURL ? `url(${props.photoURL})` : 'none'};
-  background-size: cover;
-  background-position: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-`;
-
-const OnlineIndicator = styled.div`
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: ${props => props.isOnline ? '#4caf50' : '#9e9e9e'};
-  margin-left: auto;
 `;
 
 const AuthOverlay = styled.div`
@@ -256,38 +130,6 @@ const LogoutButton = styled.button`
   cursor: pointer;
   &:hover {
     background-color: #f0f0f0;
-  }
-  
-  @media (max-width: 768px) {
-    padding: 8px;
-    font-size: 0.8em;
-    top: 10px;
-    left: 10px;
-  }
-`;
-
-const UsersButton = styled.button`
-  position: absolute;
-  top: 70px;
-  left: 10px;
-  z-index: 1500;
-  background-color: white;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  padding: 10px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  &:hover {
-    background-color: #f0f0f0;
-  }
-  
-  @media (max-width: 768px) {
-    padding: 8px;
-    font-size: 0.8em;
-    top: 60px;
-    left: 10px;
   }
 `;
 
@@ -362,10 +204,7 @@ const PopupHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
-  font-weight: bold;
-  font-size: 1.1em;
   position: relative;
-  padding-right: 20px; /* Espace pour le bouton de fermeture */
 `;
 
 const ColorPickerContainer = styled.div`
@@ -384,7 +223,7 @@ const ColorPickerContainer = styled.div`
 
 const ColorButton = styled.button`
   position: absolute;
-  top: 130px;
+  top: 70px;
   left: 10px;
   z-index: 1000;
   background-color: white;
@@ -397,128 +236,6 @@ const ColorButton = styled.button`
   gap: 5px;
   &:hover {
     background-color: #f0f0f0;
-  }
-  
-  @media (max-width: 768px) {
-    padding: 8px;
-    font-size: 0.8em;
-    top: 110px;
-    left: 10px;
-  }
-`;
-
-// Nouveaux composants pour la barre de recherche et le filtre
-const SearchContainer = styled.div`
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  background-color: white;
-  padding: 10px;
-  border-radius: 5px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2);
-  width: 70%;
-  max-width: 600px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  
-  @media (max-width: 768px) {
-    width: 90%;
-    top: 10px;
-    padding: 8px;
-  }
-`;
-
-const SearchInputContainer = styled.div`
-  display: flex;
-  align-items: center;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  padding: 0 10px;
-  background-color: #f9f9f9;
-`;
-
-const SearchInput = styled.input`
-  flex: 1;
-  padding: 10px;
-  border: none;
-  outline: none;
-  background: transparent;
-  
-  @media (max-width: 768px) {
-    padding: 8px 5px;
-    font-size: 0.9em;
-  }
-`;
-
-const SearchResults = styled.div`
-  max-height: 200px;
-  overflow-y: auto;
-  border-radius: 5px;
-  background-color: white;
-  box-shadow: ${props => props.isVisible ? '0 4px 8px rgba(0,0,0,0.1)' : 'none'};
-  display: ${props => props.isVisible ? 'block' : 'none'};
-  
-  @media (max-width: 768px) {
-    max-height: 150px;
-  }
-`;
-
-const SearchResultItem = styled.div`
-  padding: 10px;
-  border-bottom: 1px solid #eee;
-  cursor: pointer;
-  &:hover {
-    background-color: #f5f5f5;
-  }
-  &:last-child {
-    border-bottom: none;
-  }
-  
-  @media (max-width: 768px) {
-    padding: 8px;
-    font-size: 0.9em;
-  }
-`;
-
-const FilterContainer = styled.div`
-  display: ${props => props.isVisible ? 'flex' : 'none'};
-  gap: 10px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-`;
-
-const FilterButton = styled.button`
-  background-color: ${props => props.active ? '#0066ff' : '#f5f5f5'};
-  color: ${props => props.active ? 'white' : 'black'};
-  border: 1px solid #ddd;
-  padding: 5px 10px;
-  border-radius: 20px;
-  font-size: 0.8em;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  transition: all 0.2s;
-  &:hover {
-    background-color: ${props => props.active ? '#0055dd' : '#e5e5e5'};
-  }
-`;
-
-const StyledPopupContent = styled.div`
-  /* Le contenu du popup avec un style amélioré */
-  padding: 5px 0;
-  
-  p {
-    margin: 5px 0;
-    font-size: 0.9em;
-  }
-  
-  h3 {
-    margin: 0 0 10px 0;
-    font-size: 1em;
   }
 `;
 
@@ -535,37 +252,20 @@ const ContextualWindowController = ({ isOpen, toggleWindow, children, title }) =
 };
 
 // Fonction pour créer une icône personnalisée basée sur un composant React et une couleur
-const createCustomIcon = (color = "#0066ff", isUser = false, photoURL = null) => {
-  let iconHtml;
-  if (isUser && photoURL) {
-    // Utiliser la photo de profil pour les autres utilisateurs
-    iconHtml = renderToString(
-      <div style={{ 
-        borderRadius: '50%', 
-        overflow: 'hidden',
-        boxShadow: '0 0 5px rgba(0,0,0,0.3)',
-        width: '34px',
-        height: '34px'
-      }}>
-        <img src={photoURL} alt="User" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      </div>
-    );
-  } else {
-    // Icône par défaut
-    iconHtml = renderToString(
-      <div style={{ 
-        background: 'white', 
-        borderRadius: '50%', 
-        padding: '5px', 
-        boxShadow: '0 0 5px rgba(0,0,0,0.3)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}>
-        {isUser ? <FaUser size={24} color={color} /> : <MdMyLocation size={24} color={color} />}
-      </div>
-    );
-  }
+const createCustomIcon = (color = "#0066ff") => {
+  const iconHtml = renderToString(
+    <div style={{ 
+      background: 'white', 
+      borderRadius: '50%', 
+      padding: '5px', 
+      boxShadow: '0 0 5px rgba(0,0,0,0.3)',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center'
+    }}>
+      <MdMyLocation size={24} color={color} />
+    </div>
+  );
 
   return L.divIcon({
     html: iconHtml,
@@ -575,147 +275,8 @@ const createCustomIcon = (color = "#0066ff", isUser = false, photoURL = null) =>
   });
 };
 
-// Composant de recherche et zoom sur la carte
-function SearchAndFilter({ map, onLocationSelect }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [showResults, setShowResults] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
-  const [activeFilters, setActiveFilters] = useState({
-    online: false,
-    offline: false,
-    nearMe: false
-  });
-
-  // Effectuer la recherche de lieux
-  useEffect(() => {
-    if (!searchQuery || searchQuery.length < 3) {
-      setSearchResults([]);
-      return;
-    }
-
-    const fetchLocations = async () => {
-      try {
-        const response = await axios.get(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery}&limit=5`
-        );
-        setSearchResults(response.data);
-        setShowResults(true);
-      } catch (error) {
-        console.error("Erreur lors de la recherche:", error);
-        setSearchResults([]);
-      }
-    };
-
-    // Imposer un délai pour éviter trop de requêtes pendant la frappe
-    const timeoutId = setTimeout(() => {
-      fetchLocations();
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
-
-  const handleLocationSelect = (location) => {
-    const { lat, lon, display_name } = location;
-    if (map && lat && lon) {
-      map.setView([lat, lon], 14);
-      if (onLocationSelect) {
-        onLocationSelect({
-          lat: parseFloat(lat),
-          lng: parseFloat(lon),
-          name: display_name
-        });
-      }
-    }
-    setShowResults(false);
-    setSearchQuery('');
-  };
-
-  const toggleFilter = (filterName) => {
-    setActiveFilters(prev => ({
-      ...prev,
-      [filterName]: !prev[filterName]
-    }));
-  };
-
-  return (
-    <SearchContainer>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <SearchInputContainer>
-          <MdSearch size={20} color="#666" />
-          <SearchInput
-            type="text"
-            placeholder="Rechercher une zone, un quartier..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => searchResults.length > 0 && setShowResults(true)}
-          />
-          {searchQuery && (
-            <MdClose 
-              size={18} 
-              color="#666" 
-              style={{ cursor: 'pointer' }} 
-              onClick={() => {
-                setSearchQuery('');
-                setSearchResults([]);
-                setShowResults(false);
-              }}
-            />
-          )}
-        </SearchInputContainer>
-        <Button 
-          onClick={() => setShowFilters(!showFilters)} 
-          style={{ marginLeft: '10px', padding: '10px' }}
-        >
-          <MdFilterList size={20} color={showFilters ? '#0066ff' : '#666'} />
-        </Button>
-      </div>
-
-      <SearchResults isVisible={showResults && searchResults.length > 0}>
-        {searchResults.map((result, index) => (
-          <SearchResultItem 
-            key={index} 
-            onClick={() => handleLocationSelect(result)}
-          >
-            <div style={{ fontWeight: 'bold' }}>
-              {result.display_name.split(',')[0]}
-            </div>
-            <div style={{ fontSize: '0.8em', color: '#666' }}>
-              {result.display_name}
-            </div>
-          </SearchResultItem>
-        ))}
-      </SearchResults>
-
-      <FilterContainer isVisible={showFilters}>
-        <FilterButton 
-          active={activeFilters.online}
-          onClick={() => toggleFilter('online')}
-        >
-          <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#4caf50' }}></div>
-          En ligne
-        </FilterButton>
-        <FilterButton 
-          active={activeFilters.offline}
-          onClick={() => toggleFilter('offline')}
-        >
-          <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#9e9e9e' }}></div>
-          Hors ligne
-        </FilterButton>
-        <FilterButton 
-          active={activeFilters.nearMe}
-          onClick={() => toggleFilter('nearMe')}
-        >
-          <MdMyLocation size={14} />
-          Près de moi
-        </FilterButton>
-      </FilterContainer>
-    </SearchContainer>
-  );
-}
-
 // Composant pour suivre la position actuelle
-function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOpen, togglePopup, currentUser }) {
+function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOpen, togglePopup }) {
   const [position, setPosition] = useState(null);
   const [speed, setSpeed] = useState(null);
   const [altitude, setAltitude] = useState(null);
@@ -741,19 +302,13 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
           }
           
           if (onNewPosition) {
-            const positionData = {
+            onNewPosition({
               position: newPosition,
               altitude,
               speed,
               accuracy,
               timestamp: new Date().toISOString()
-            };
-            onNewPosition(positionData);
-            
-            // Si l'utilisateur est connecté, mettre à jour sa position dans Appwrite
-            if (currentUser) {
-              updateUserLocation(positionData);
-            }
+            });
           }
         },
         (error) => {
@@ -772,75 +327,7 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [map, onLocationFound, onNewPosition, currentUser]);
-
-  // Fonction pour mettre à jour la position de l'utilisateur dans Appwrite
-  const updateUserLocation = async (positionData) => {
-    try {
-      // Vérifier si l'utilisateur existe déjà dans la collection "users"
-      const response = await databases.listDocuments(
-        AppwriteConfig.databaseId,
-        AppwriteConfig.usersCollectionId,
-        [
-          Query.equal("userId", currentUser.$id)
-        ]
-      );
-      
-      const userData = {
-        userId: currentUser.$id,
-        displayName: currentUser.name || "Utilisateur",
-        email: currentUser.email,
-        location: {
-          latitude: positionData.position.lat,
-          longitude: positionData.position.lng,
-          altitude: positionData.altitude,
-          speed: positionData.speed,
-          accuracy: positionData.accuracy,
-          lastUpdated: new Date().toISOString()
-        },
-        isOnline: true
-      };
-      
-      if (response.documents.length > 0) {
-        // L'utilisateur existe, mettre à jour sa position
-        await databases.updateDocument(
-          AppwriteConfig.databaseId,
-          AppwriteConfig.usersCollectionId,
-          response.documents[0].$id,
-          userData
-        );
-      } else {
-        // L'utilisateur n'existe pas encore, l'ajouter
-        await databases.createDocument(
-          AppwriteConfig.databaseId,
-          AppwriteConfig.usersCollectionId,
-          ID.unique(),
-          {
-            ...userData,
-            createdAt: new Date().toISOString()
-          }
-        );
-      }
-      
-      // Enregistrer également l'historique de position
-      await databases.createDocument(
-        AppwriteConfig.databaseId,
-        AppwriteConfig.locationsCollectionId,
-        ID.unique(),
-        {
-          userId: currentUser.$id,
-          latitude: positionData.position.lat,
-          longitude: positionData.position.lng,
-          altitude: positionData.altitude,
-          speed: positionData.speed,
-          accuracy: positionData.accuracy,
-          timestamp: new Date().toISOString()
-        }
-      );
-    } catch (error) {
-      console.error("Erreur lors de la mise à jour de la position:", error);
-    }
-  };
+  }, [map, onLocationFound, onNewPosition]);
 
   // Effet pour ouvrir ou fermer le popup selon l'état
   useEffect(() => {
@@ -877,141 +364,22 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
       <Popup 
         autoPan={true}
         closeButton={false}
-        className="custom-popup"
       >
-        <StyledPopupContent>
-          <h3>Votre position actuelle</h3>
-          <CloseButton onClick={() => togglePopup(false)} style={{ top: '8px', right: '5px' }}>
-            <MdClose size={18} />
-          </CloseButton>
+        <div>
+          <PopupHeader>
+            <h3>Votre position actuelle</h3>
+            <CloseButton onClick={() => togglePopup(false)}>
+              <MdClose size={20} />
+            </CloseButton>
+          </PopupHeader>
           <p>Latitude: {position.lat.toFixed(6)}</p>
           <p>Longitude: {position.lng.toFixed(6)}</p>
           {altitude !== null && <p>Altitude: {typeof altitude === 'number' ? `${altitude.toFixed(1)} m` : altitude}</p>}
           {speed !== null && <p>Vitesse: {typeof speed === 'number' ? `${(speed * 3.6).toFixed(1)} km/h` : speed}</p>}
-          {currentUser && <p>Connecté en tant que: {currentUser.name || currentUser.email}</p>}
-        </StyledPopupContent>
+        </div>
       </Popup>
     </Marker>
   );
-}
-
-// Composant pour afficher un utilisateur sur la carte
-function UserMarker({ user, currentUserId, filterSettings }) {
-  const isCurrentUser = user.userId === currentUserId;
-  const markerRef = useRef(null);
-  const markerColor = isCurrentUser ? "#0066ff" : "#FF4136";
-  
-  // Ne pas afficher de marqueur pour l'utilisateur actuel (déjà affiché par LocationMarker)
-   if (isCurrentUser) return null;
-  
-  // Filtrage des utilisateurs selon les paramètres
-  if (filterSettings) {
-    // Filtre en ligne/hors ligne
-    if (filterSettings.online && !user.isOnline) return null;
-    if (filterSettings.offline && user.isOnline) return null;
-    
-    // Filtre "près de moi" - nécessite de calculer la distance
-    if (filterSettings.nearMe && filterSettings.userPosition) {
-      const distance = calculateDistance(
-        filterSettings.userPosition.lat,
-        filterSettings.userPosition.lng,
-        user.location.latitude,
-        user.location.longitude
-      );
-      // Considérer "près de moi" comme étant à moins de 5 km
-      if (distance > 5) return null;
-    }
-  }
-  
-  const position = [user.location.latitude, user.location.longitude];
-  const userIcon = createCustomIcon(markerColor, true, user.photoURL);
-  
-  return (
-    <Marker 
-      position={position} 
-      icon={userIcon}
-      ref={markerRef}
-      eventHandlers={{
-        popupopen: () => {
-          markerRef.current.openPopup();
-        },
-        popupclose: () => {
-          markerRef.current.closePopup();
-        }
-      }}
-    >
-      <Popup 
-        autoPan={true}
-        closeButton={true}
-        className="custom-popup"
-      >
-        <StyledPopupContent>
-          <h3>{user.displayName || "Utilisateur"}</h3>
-          <p>Latitude: {user.location.latitude.toFixed(6)}</p>
-          <p>Longitude: {user.location.longitude.toFixed(6)}</p>
-          {user.location.altitude && <p>Altitude: {user.location.altitude.toFixed(1)} m</p>}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
-            {user.photoURL ? (
-              <img 
-                src={user.photoURL} 
-                alt={user.displayName} 
-                style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover' }}
-              />
-            ) : (
-              <div style={{ 
-                width: '40px', 
-                height: '40px', 
-                borderRadius: '50%', 
-                backgroundColor: '#ddd',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <FaUser size={20} color="#666" />
-              </div>
-            )}
-            <div>
-              <div>{user.displayName || "Utilisateur"}</div>
-              <div style={{ fontSize: '0.8em', color: '#666' }}>
-                {user.isOnline ? "En ligne" : "Hors ligne"}
-              </div>
-            </div>
-          </div>
-        </StyledPopupContent>
-      </Popup>
-    </Marker>
-  );
-}
-
-// Fonction pour calculer la distance entre deux points géographiques
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Rayon de la Terre en kilomètres
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = 
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-// Convertir degrés en radians
-function toRad(degrees) {
-  return degrees * Math.PI / 180;
-}
-
-// Composant pour accéder à la carte depuis les sous-composants enfants
-function MapController({ children, onMapReady }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (onMapReady) {
-      onMapReady(map);
-    }
-  }, [map, onMapReady]);
-  
-  return <>{children}</>;
 }
 
 function GeoSpace() {
@@ -1022,7 +390,6 @@ function GeoSpace() {
   const [permissionRequested, setPermissionRequested] = useState(false);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
-  const [showUsersPanel, setShowUsersPanel] = useState(false);
   const [markerColor, setMarkerColor] = useState("#0066ff");
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [locationInfo, setLocationInfo] = useState({
@@ -1038,118 +405,23 @@ function GeoSpace() {
   });
   const [locationHistory, setLocationHistory] = useState([]);
   const [userIp, setUserIp] = useState('');
-  const [onlineUsers, setOnlineUsers] = useState([]);
-  const [leafletMap, setLeafletMap] = useState(null);
-  const [userPosition, setUserPosition] = useState(null);
-  const [filterSettings, setFilterSettings] = useState({
-    online: false,
-    offline: false,
-    nearMe: false,
-    userPosition: null
-  });
   
-  // Vérifier l'état de l'authentification au démarrage
+  // Vérifier si l'utilisateur est déjà connecté
   useEffect(() => {
     const checkCurrentUser = async () => {
       try {
-        const user = await account.get();
+        const user = await getCurrentUser();
         if (user) {
-          setCurrentUser(user);
           setIsAuthenticated(true);
-          setPermissionRequested(true);
-          
-          // Mettre à jour le statut de l'utilisateur dans la base de données
-          updateUserStatus(user.$id, true);
+          setCurrentUser(user);
         }
       } catch (error) {
-        console.log('Not authenticated yet');
-        setCurrentUser(null);
-        setIsAuthenticated(false);
+        console.error('Erreur lors de la vérification de l\'utilisateur:', error);
       }
     };
     
     checkCurrentUser();
-    
-    // Créer un intervalle pour récupérer les utilisateurs
-    const interval = setInterval(fetchOnlineUsers, 10000); // Toutes les 10 secondes
-    
-    return () => {
-      clearInterval(interval);
-    };
   }, []);
-  
-  // Mettre à jour les filtres quand la position de l'utilisateur change
-  useEffect(() => {
-    if (userPosition) {
-      setFilterSettings(prev => ({
-        ...prev,
-        userPosition
-      }));
-    }
-  }, [userPosition]);
-  
-  // Fonction pour récupérer les utilisateurs en ligne
-  const fetchOnlineUsers = async () => {
-    if (!isAuthenticated) return;
-    
-    try {
-      const response = await databases.listDocuments(
-        AppwriteConfig.databaseId,
-        AppwriteConfig.usersCollectionId,
-        [
-          Query.isNotNull("location")
-        ]
-      );
-      
-      setOnlineUsers(response.documents);
-    } catch (error) {
-      console.error("Erreur lors de la récupération des utilisateurs:", error);
-    }
-  };
-  
-  // Mettre à jour le statut de l'utilisateur dans la base de données
-  const updateUserStatus = async (userId, isOnline) => {
-    try {
-      // Vérifier si l'utilisateur existe déjà
-      const response = await databases.listDocuments(
-        AppwriteConfig.databaseId,
-        AppwriteConfig.usersCollectionId,
-        [
-          Query.equal("userId", userId)
-        ]
-      );
-      
-      if (response.documents.length > 0) {
-        // L'utilisateur existe, mettre à jour
-        await databases.updateDocument(
-          AppwriteConfig.databaseId,
-          AppwriteConfig.usersCollectionId,
-          response.documents[0].$id,
-          {
-            isOnline: isOnline,
-            lastSeen: new Date().toISOString()
-          }
-        );
-      } else if (isOnline && currentUser) {
-        // L'utilisateur n'existe pas et se connecte, le créer
-        await databases.createDocument(
-          AppwriteConfig.databaseId,
-          AppwriteConfig.usersCollectionId,
-          ID.unique(),
-          {
-            userId: userId,
-            displayName: currentUser.name || "Utilisateur",
-            email: currentUser.email,
-            isOnline: true,
-            createdAt: new Date().toISOString(),
-            lastSeen: new Date().toISOString()
-          }
-        );
-      }
-    } catch (error) {
-      console.error("Erreur lors de la mise à jour du statut:", error);
-    }
-  };
   
   // Récupérer l'adresse IP de l'utilisateur au démarrage
   useEffect(() => {
@@ -1166,49 +438,20 @@ function GeoSpace() {
     fetchUserIp();
   }, []);
 
-  // Mettre à jour la liste des utilisateurs en ligne quand l'état d'authentification change
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchOnlineUsers();
-      
-      // Configurer l'événement beforeunload pour mettre à jour le statut
-      const handleBeforeUnload = () => {
-        if (currentUser) {
-          updateUserStatus(currentUser.$id, false);
-        }
-      };
-      
-      window.addEventListener('beforeunload', handleBeforeUnload);
-      
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        if (currentUser) {
-          updateUserStatus(currentUser.$id, false);
-        }
-      };
-    }
-  }, [isAuthenticated, currentUser]);
-
   // Fonction pour l'authentification Google
-  const handleGoogleAuth = () => {
+  const handleGoogleAuth = async () => {
     try {
-      const redirectUrl = window.location.origin;
-      account.createOAuth2Session('google', redirectUrl, redirectUrl);
+      loginWithGoogle(); // Utiliser la fonction d'authentification d'Appwrite
     } catch (error) {
-      console.error("Erreur d'authentification Google:", error);
-      alert("Échec de la connexion. Veuillez réessayer.");
+      console.error("Erreur lors de l'authentification Google:", error);
+      alert("Erreur lors de la connexion. Veuillez réessayer.");
     }
   };
   
   // Fonction pour se déconnecter
   const handleLogout = async () => {
     try {
-      // Mettre à jour le statut en ligne avant la déconnexion
-      if (currentUser) {
-        await updateUserStatus(currentUser.$id, false);
-      }
-      
-      await account.deleteSession('current');
+      await logoutUser();
       setIsAuthenticated(false);
       setCurrentUser(null);
     } catch (error) {
@@ -1226,9 +469,18 @@ function GeoSpace() {
           setZoom(16);
           setPermissionRequested(false);
           setIsPopupOpen(true); // Ouvrir le popup après obtention de la position
-          setUserPosition({ lat: latitude, lng: longitude });
+          
           // Récupérer les informations de localisation
           fetchLocationDetails(latitude, longitude, altitude, speed, accuracy);
+          
+          // Sauvegarder la position dans Appwrite si l'utilisateur est connecté
+          if (currentUser) {
+            saveUserLocation(
+              currentUser.$id, 
+              { lat: latitude, lng: longitude },
+              { neighborhood: locationInfo.neighborhood, city: locationInfo.city }
+            ).catch(error => console.error('Erreur lors de la sauvegarde de la position:', error));
+          }
         },
         (error) => {
           console.error('Error getting location:', error);
@@ -1280,21 +532,118 @@ function GeoSpace() {
     }
   };
 
-  // Fonction pour afficher ou fermer le popup
-  const togglePopup = (state) => {
-    setIsPopupOpen(typeof state === 'boolean' ? state : !isPopupOpen);
+  // Fonction pour centrer sur la position actuelle
+  const centerOnLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude, altitude, speed, accuracy } = position.coords;
+          setMapCenter([latitude, longitude]);
+          setZoom(16);
+          setIsPopupOpen(true); // Ouvrir le popup quand on centre sur la position
+          fetchLocationDetails(latitude, longitude, altitude, speed, accuracy);
+          
+          // Sauvegarder la position dans Appwrite si l'utilisateur est connecté
+          if (currentUser) {
+            saveUserLocation(
+              currentUser.$id, 
+              { lat: latitude, lng: longitude },
+              { neighborhood: locationInfo.neighborhood, city: locationInfo.city }
+            ).catch(error => console.error('Erreur lors de la sauvegarde de la position:', error));
+          }
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          alert('Impossible d\'obtenir votre position. Veuillez vérifier les permissions.');
+        },
+        { enableHighAccuracy: true }
+      );
+    } else {
+      alert('La géolocalisation n\'est pas supportée par votre navigateur.');
+    }
   };
 
-  // Fonction pour basculer l'affichage du panneau d'information utilisateur
+  const handleLocationFound = (latlng) => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { altitude, speed, accuracy } = position.coords;
+          fetchLocationDetails(latlng.lat, latlng.lng, altitude, speed, accuracy);
+        },
+        (error) => {
+          console.error('Error getting location details:', error);
+          fetchLocationDetails(latlng.lat, latlng.lng, null, null, null);
+        },
+        { enableHighAccuracy: true }
+      );
+    } else {
+      fetchLocationDetails(latlng.lat, latlng.lng, null, null, null);
+    }
+  };
+
+  // Fonction pour enregistrer une nouvelle position
+  const handleNewPosition = (positionData) => {
+    // Ajouter la nouvelle position à l'historique
+    const newHistoryItem = {
+      ...positionData,
+      id: Date.now(), // Utiliser un timestamp comme identifiant unique
+    };
+    
+    setLocationHistory(prevHistory => {
+      // Limiter l'historique aux 20 dernières positions
+      const updatedHistory = [newHistoryItem, ...prevHistory].slice(0, 20);
+      
+      // Sauvegarder dans Appwrite si l'utilisateur est connecté
+      if (currentUser) {
+        saveUserLocation(
+          currentUser.$id, 
+          newHistoryItem.position,
+          { 
+            neighborhood: locationInfo.neighborhood, 
+            city: locationInfo.city,
+            timestamp: newHistoryItem.timestamp
+          }
+        ).catch(error => console.error('Erreur lors de la sauvegarde de la position:', error));
+      }
+      
+      return updatedHistory;
+    });
+  };
+
+  // Fonction pour centrer la carte sur une position de l'historique
+  const goToHistoricalPosition = (position) => {
+    setMapCenter([position.position.lat, position.position.lng]);
+    setZoom(16);
+  };
+  
+  // Formater l'heure pour l'affichage dans l'historique
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString();
+  };
+
+  // Fonction pour basculer l'état du popup
+  const togglePopup = (state) => {
+        setIsPopupOpen(typeof state === 'boolean' ? state : !isPopupOpen);
+  };
+  
+  // Fonction pour basculer l'affichage du panneau d'information
   const toggleInfoPanel = (state) => {
     setShowInfoPanel(typeof state === 'boolean' ? state : !showInfoPanel);
   };
 
-  // Fonction pour afficher ou masquer le panneau des utilisateurs en ligne
-  const toggleUsersPanel = (state) => {
-    setShowUsersPanel(typeof state === 'boolean' ? state : !showUsersPanel);
-  };
+  // Liste de couleurs prédéfinies pour les marqueurs
+  const predefinedColors = [
+    "#0066ff", // Bleu (par défaut)
+    "#FF4136", // Rouge
+    "#2ECC40", // Vert
+    "#FF851B", // Orange
+    "#B10DC9", // Violet
+    "#111111", // Noir
+    "#85144b"  // Bordeaux
+  ];
 
+  // Si l'utilisateur n'est pas connecté, afficher l'écran d'authentification
   if (!isAuthenticated) {
     return (
       <AuthOverlay>
@@ -1316,7 +665,8 @@ function GeoSpace() {
         <PermissionOverlay>
           <PermissionContainer>
             <h2>Autorisation de localisation</h2>
-            <p>Nous avons besoin d'accéder à votre position géographique pour une expérience optimale.</p>
+            <p>Pour profiter pleinement de l'application, nous avons besoin d'accéder à votre position géographique.</p>
+            <p>Cela nous permettra de vous localiser sur la carte et de vous fournir des informations sur votre quartier.</p>
             <Button onClick={requestLocationPermission} style={{ margin: '20px auto', padding: '12px 20px' }}>
               <MdMyLocation size={20} style={{ marginRight: '5px' }} />
               Autoriser l'accès à ma position
@@ -1327,69 +677,54 @@ function GeoSpace() {
           </PermissionContainer>
         </PermissionOverlay>
       )}
-
+      
+      {/* Bouton de déconnexion affiché uniquement lorsque l'utilisateur est connecté */}
       <LogoutButton onClick={handleLogout}>
         <MdLogout size={18} />
         Déconnexion
       </LogoutButton>
-
-      <UsersButton onClick={() => toggleUsersPanel()}>
-        <MdPeople size={18} />
-        {showUsersPanel ? 'Masquer les utilisateurs' : 'Afficher les utilisateurs'}
-      </UsersButton>
-
+      
       <MapWrapper>
         <MapContainer center={mapCenter} zoom={zoom} scrollWheelZoom={true}>
-          <MapController onMapReady={setLeafletMap}>
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <LocationMarker 
-              onLocationFound={(latLng) => console.log("Position trouvée sur la carte", latLng)} 
-              onNewPosition={(posData) => {
-                console.log("Nouvelle position détectée", posData);
-                setUserPosition(posData.position);
-              }}
-              markerColor={markerColor}
-              isPopupOpen={isPopupOpen}
-              togglePopup={togglePopup}
-              currentUser={currentUser}
-            />
-            {onlineUsers.map(user => (
-              <UserMarker 
-                key={user.userId} 
-                user={user} 
-                currentUserId={currentUser?.$id || ''}
-                filterSettings={filterSettings}
-              />
-            ))}
-          </MapController>
+          {/* Couche de carte OpenStreetMap */}
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {/* Marqueur de localisation actuelle */}
+          <LocationMarker 
+            onLocationFound={handleLocationFound} 
+            onNewPosition={handleNewPosition}
+            markerColor={markerColor}
+            isPopupOpen={isPopupOpen}
+            togglePopup={togglePopup}
+          />
+          <MapController center={mapCenter} zoom={zoom} />
+
+          {/* Composant pour afficher les utilisateurs inscrits sur la carte */}
+          <UsersMap />
         </MapContainer>
-      </MapWrapper>
 
-      <SearchAndFilter 
-        map={leafletMap} 
-        onLocationSelect={setMapCenter}
-      />
+        {/* Sélecteur pour choisir une couleur de marqueur */}
+        <ColorButton onClick={() => setShowColorPicker(!showColorPicker)}>
+          <MdColorLens size={18} />
+          Couleur du marqueur
+        </ColorButton>
 
-      <ColorButton onClick={() => setShowColorPicker(!showColorPicker)}>
-        <MdColorLens size={18} />
-        Couleur du marqueur
-      </ColorButton>
-
-      {showColorPicker && (
-        <ColorPickerContainer>
-          <ContextualWindowController 
-            isOpen={showColorPicker} 
-            toggleWindow={setShowColorPicker}
-            title="Couleur du marqueur"
-          >
-            <div>
+        {showColorPicker && (
+          <ColorPickerContainer>
+            <ContextualWindowController 
+              isOpen={showColorPicker} 
+              toggleWindow={setShowColorPicker}
+              title="Couleur du marqueur"
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Couleur du marqueur</span>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                {['#0066ff', '#FF4136', '#2ECC40', '#FF851B', '#B10DC9', '#111111', '#85144b'].map(color => (
+                {predefinedColors.map((color, index) => (
                   <div 
-                    key={color}
+                    key={index}
                     style={{
                       backgroundColor: color,
                       width: '30px',
@@ -1408,53 +743,110 @@ function GeoSpace() {
                 onChange={(e) => setMarkerColor(e.target.value)}
                 style={{ width: '100%' }}
               />
-            </div>
-          </ContextualWindowController>
-        </ColorPickerContainer>
-      )}
+            </ContextualWindowController>
+          </ColorPickerContainer>
+        )}
 
-      {showInfoPanel && (
-        <InfoPanel>
-          <ContextualWindowController
-            isOpen={showInfoPanel}
-            toggleWindow={toggleInfoPanel}
-          >
-            <h3>Votre localisation</h3>
-            <p>Quartier : {locationInfo.neighborhood}</p>
-            <p>Ville : {locationInfo.city}</p>
-            <p>Pays : {locationInfo.country}</p>
-            <p>Latitude : {locationInfo.latitude}</p>
-            <p>Longitude : {locationInfo.longitude}</p>
-          </ContextualWindowController>
-        </InfoPanel>
-      )}
-
-      {showUsersPanel && (
-        <UsersPanel>
-          <h3>Utilisateurs connectés</h3>
-          {onlineUsers.map(user => (
-            <UserItem 
-              key={user.userId} 
-              isCurrentUser={user.userId === currentUser?.$id}
-              onClick={() => console.log(user)}
+        {/* Panneau d'informations sur la localisation */}
+        {showInfoPanel && (
+          <InfoPanel>
+            <ContextualWindowController
+              isOpen={showInfoPanel}
+              toggleWindow={toggleInfoPanel}
+              title="Votre localisation"
             >
-              <UserAvatar photoURL={user.photoURL}>
-                {!user.photoURL && <FaUser />}
-              </UserAvatar>
-              <span>{user.displayName || "Utilisateur inconnu"}</span>
-              <OnlineIndicator isOnline={user.isOnline} />
-            </UserItem>
-          ))}
-        </UsersPanel>
-      )}
+              <h3>Votre localisation</h3>
+              
+              <SectionTitle>Informations géographiques</SectionTitle>
+              <LocationInfo>
+                <FaMapMarkerAlt size={16} color="#FF4136" />
+                <span>Quartier: {locationInfo.neighborhood}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdLocationCity size={16} color="#0074D9" />
+                <span>Ville: {locationInfo.city}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdOutlinePublic size={16} color="#2ECC40" />
+                <span>Pays: {locationInfo.country}</span>
+              </LocationInfo>
+              
+              <SectionTitle>Données techniques</SectionTitle>
+              <LocationInfo>
+                <MdMyLocation size={16} color={markerColor} />
+                <span>Latitude: {locationInfo.latitude}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdMyLocation size={16} color={markerColor} />
+                <span>Longitude: {locationInfo.longitude}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdTerrain size={16} color="#B10DC9" />
+                <span>Altitude: {locationInfo.altitude}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdSpeed size={16} color="#FF851B" />
+                <span>Vitesse: {locationInfo.speed}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdNetworkWifi size={16} color="#85144b" />
+                <span>Précision: {locationInfo.accuracy}</span>
+              </LocationInfo>
+              <LocationInfo>
+                <MdNetworkWifi size={16} color="#3D9970" />
+                <span>Adresse IP: {locationInfo.ip}</span>
+              </LocationInfo>
 
-      <ControlPanel>
-        <Button onClick={() => setMapCenter([48.8566, 2.3522])}>
-          <MdMyLocation size={20} /> Centrer Paris
-        </Button>
-      </ControlPanel>
+              {/* Historique des positions */}
+              {locationHistory.length > 0 && (
+                <HistoryContainer>
+                  <SectionTitle>
+                    <FaHistory size={16} color="#AAAAAA" />
+                    Historique des positions
+                  </SectionTitle>
+                  {locationHistory.map((item, index) => (
+                    <HistoryItem 
+                      key={item.id} 
+                      onClick={() => goToHistoricalPosition(item)}
+                    >
+                      {formatTime(item.timestamp)} - 
+                      Lat: {item.position.lat.toFixed(4)}, 
+                      Lng: {item.position.lng.toFixed(4)}
+                    </HistoryItem>
+                  ))}
+                </HistoryContainer>
+              )}
+            </ContextualWindowController>
+          </InfoPanel>
+        )}
+
+        {/* Contrôles en bas de la page */}
+        <ControlPanel>
+          <Button onClick={centerOnLocation}>
+            <MdMyLocation size={20} style={{ marginRight: '5px' }} />
+            Ma position
+          </Button>
+          <Button onClick={() => togglePopup()}>
+            {isPopupOpen ? 'Fermer le popup' : 'Ouvrir le popup'}
+          </Button>
+          <Button onClick={() => toggleInfoPanel()}>
+            {showInfoPanel ? 'Masquer les infos' : 'Afficher les infos'}
+          </Button>
+        </ControlPanel>
+      </MapWrapper>
     </GeoSpaceContainer>
   );
+}
+
+// Composant pour contrôler la vue de la carte
+function MapController({ center, zoom }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [center, zoom, map]);
+  
+  return null;
 }
 
 export default GeoSpace;
