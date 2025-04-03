@@ -10,7 +10,7 @@ import axios from 'axios';
 import UsersMap from './UsersMap'; // Importer le nouveau composant
 import { loginWithGoogle, getCurrentUser, logoutUser, saveUserLocation } from './appwrite'; // Utiliser les fonctions d'authentification d'Appwrite
 
-// Styles pour la page (inchangés)
+// Styles pour la page
 const GeoSpaceContainer = styled.div`
   height: 100vh;
   width: 100%;
@@ -29,14 +29,17 @@ const MapWrapper = styled.div`
   }
 `;
 
+// Boutons de contrôle repositionnés horizontalement
 const ControlPanel = styled.div`
   position: absolute;
-  bottom: 80px; // Modifié pour laisser de la place à la barre de recherche
+  bottom: 80px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
   display: flex;
+  flex-direction: row; // Assure que les boutons sont en ligne
   gap: 10px;
+  justify-content: center; // Centre les boutons horizontalement
 `;
 
 const SearchBar = styled.div`
@@ -90,6 +93,33 @@ const SearchInput = styled.div`
   }
 `;
 
+// Disposition horizontale pour les catégories de recherche
+const SearchCategories = styled.div`
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+  justify-content: center;
+`;
+
+const CategoryButton = styled.button`
+  background-color: ${props => props.active ? "#0066ff" : "#f0f0f0"};
+  color: ${props => props.active ? "white" : "#333"};
+  border: none;
+  border-radius: 15px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  
+  &:hover {
+    background-color: ${props => props.active ? "#0052cc" : "#e0e0e0"};
+  }
+`;
+
 const SearchResults = styled.div`
   max-height: 200px;
   overflow-y: auto;
@@ -129,29 +159,6 @@ const SearchResultItem = styled.div`
   }
 `;
 
-const SearchCategories = styled.div`
-  display: flex;
-  gap: 5px;
-  margin-bottom: 10px;
-`;
-
-const CategoryButton = styled.button`
-  background-color: ${props => props.active ? "#0066ff" : "#f0f0f0"};
-  color: ${props => props.active ? "white" : "#333"};
-  border: none;
-  border-radius: 15px;
-  padding: 5px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  
-  &:hover {
-    background-color: ${props => props.active ? "#0052cc" : "#e0e0e0"};
-  }
-`;
-
 const Button = styled.button`
   padding: 10px 15px;
   background-color: white;
@@ -166,6 +173,7 @@ const Button = styled.button`
   }
 `;
 
+// Position des panneaux latéraux
 const InfoPanel = styled.div`
   position: absolute;
   top: 10px;
@@ -226,6 +234,17 @@ const GoogleButton = styled.button`
   &:hover {
     background-color: #3367D6;
   }
+`;
+
+// Boutons de contrôle sur les côtés
+const SideControlsLeft = styled.div`
+  position: absolute;
+  left: 10px;
+  top: 70px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 `;
 
 const LogoutButton = styled.button`
@@ -320,11 +339,8 @@ const PopupHeader = styled.div`
   position: relative;
 `;
 
+// Déplacé le sélecteur de couleur dans la barre latérale
 const ColorPickerContainer = styled.div`
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 1000;
   background-color: white;
   padding: 10px;
   border-radius: 5px;
@@ -332,24 +348,11 @@ const ColorPickerContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-top: 10px;
 `;
 
-const ColorButton = styled.button`
-  position: absolute;
-  top: 70px;
-  left: 10px;
-  z-index: 1000;
-  background-color: white;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  padding: 10px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  &:hover {
-    background-color: #f0f0f0;
-  }
+const ColorButton = styled(Button)`
+  width: 100%;
 `;
 
 // Sous-composant pour gérer l'ouverture/fermeture des fenêtres contextuelles
@@ -868,7 +871,7 @@ function GeoSpace() {
     "#85144b"  // Bordeaux
   ];
 
-  // Si l'utilisateur n'est pas connecté, afficher l'écran d'authentification
+  //  moteur de recherche n'est pas connecté, afficher l'écran d'authentification
   if (!isAuthenticated) {
     return (
       <AuthOverlay>
@@ -908,6 +911,23 @@ function GeoSpace() {
         <MdLogout size={18} />
         Déconnexion
       </LogoutButton>
+
+      <SideControlsLeft>
+        <Button onClick={centerOnLocation}>
+          <MdMyLocation size={20} style={{ marginRight: '5px' }} />
+          Ma position
+        </Button>
+        <ColorButton onClick={() => setShowColorPicker(!showColorPicker)}>
+          <MdColorLens size={18} />
+          Couleur du marqueur
+        </ColorButton>
+        <Button onClick={() => toggleInfoPanel()}>
+          {showInfoPanel ? 'Masquer les infos' : 'Afficher les infos'}
+        </Button>
+        <Button onClick={() => togglePopup()}>
+          {isPopupOpen ? 'Fermer le popup' : 'Ouvrir le popup'}
+        </Button>
+      </SideControlsLeft>
       
       <MapWrapper>
         <MapContainer center={mapCenter} zoom={zoom} scrollWheelZoom={true}>
@@ -932,11 +952,6 @@ function GeoSpace() {
         </MapContainer>
 
         {/* Sélecteur pour choisir une couleur de marqueur */}
-        <ColorButton onClick={() => setShowColorPicker(!showColorPicker)}>
-          <MdColorLens size={18} />
-          Couleur du marqueur
-        </ColorButton>
-
         {showColorPicker && (
           <ColorPickerContainer>
             <ContextualWindowController 
@@ -972,156 +987,142 @@ function GeoSpace() {
             </ContextualWindowController>
           </ColorPickerContainer>
         )}
-
-        {/* Panneau d'informations sur la localisation */}
-        {showInfoPanel && (
-          <InfoPanel>
-            <ContextualWindowController
-              isOpen={showInfoPanel}
-              toggleWindow={toggleInfoPanel}
-              title="Votre localisation"
-            >
-              <h3>Votre localisation</h3>
-              
-              <SectionTitle>Informations géographiques</SectionTitle>
-              <LocationInfo>
-                <FaMapMarkerAlt size={16} color="#FF4136" />
-                <span>Quartier: {locationInfo.neighborhood}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdLocationCity size={16} color="#0074D9" />
-                <span>Ville: {locationInfo.city}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdOutlinePublic size={16} color="#2ECC40" />
-                <span>Pays: {locationInfo.country}</span>
-              </LocationInfo>
-              
-              <SectionTitle>Données techniques</SectionTitle>
-              <LocationInfo>
-                <MdMyLocation size={16} color={markerColor} />
-                <span>Latitude: {locationInfo.latitude}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdMyLocation size={16} color={markerColor} />
-                <span>Longitude: {locationInfo.longitude}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdTerrain size={16} color="#B10DC9" />
-                <span>Altitude: {locationInfo.altitude}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdSpeed size={16} color="#FF851B" />
-                <span>Vitesse: {locationInfo.speed}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdNetworkWifi size={16} color="#85144b" />
-                <span>Précision: {locationInfo.accuracy}</span>
-              </LocationInfo>
-              <LocationInfo>
-                <MdNetworkWifi size={16} color="#3D9970" />
-                <span>Adresse IP: {locationInfo.ip}</span>
-              </LocationInfo>
-
-              {/* Historique des positions */}
-              {locationHistory.length > 0 && (
-                <HistoryContainer>
-                  <SectionTitle>
-                    <FaHistory size={16} color="#AAAAAA" />
-                    Historique des positions
-                  </SectionTitle>
-                  {locationHistory.map((item, index) => (
-                    <HistoryItem 
-                      key={item.id} 
-                      onClick={() => goToHistoricalPosition(item)}
-                    >
-                      {formatTime(item.timestamp)} - 
-                      Lat: {item.position.lat.toFixed(4)}, 
-                      Lng: {item.position.lng.toFixed(4)}
-                    </HistoryItem>
-                  ))}
-                </HistoryContainer>
-              )}
-            </ContextualWindowController>
-          </InfoPanel>
-        )}
-
-        {/* Barre de recherche située dans le footer */}
-        <SearchBar>
-          <SearchCategories>
-            <CategoryButton
-              active={activeCategory === 'all'}
-              onClick={() => setActiveCategory('all')}
-            >
-              <MdSearch /> Tous
-            </CategoryButton>
-            <CategoryButton
-              active={activeCategory === 'cities'}
-              onClick={() => setActiveCategory('cities')}
-            >
-              <FaCity /> Villes
-            </CategoryButton>
-            <CategoryButton
-              active={activeCategory === 'regions'}
-              onClick={() => setActiveCategory('regions')}
-            >
-              <MdTerrain /> Régions
-            </CategoryButton>
-            <CategoryButton
-              active={activeCategory === 'users'}
-              onClick={() => setActiveCategory('users')}
-            >
-              <FaUsers /> Utilisateurs
-            </CategoryButton>
-          </SearchCategories>
-          <SearchInput showResults={showSearchResults}>
-            <input
-              type="text"
-              placeholder="Rechercher des villes, quartiers, régions, ou utilisateurs..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <button onClick={handleSearch} disabled={isSearching}>
-              <MdSearch size={20} />
-              {isSearching ? 'Recherche...' : 'Rechercher'}
-            </button>
-          </SearchInput>
-          {showSearchResults && (
-            <SearchResults>
-              {searchResults.length > 0 ? (
-                searchResults.map((result) => (
-                  <SearchResultItem
-                    key={result.id}
-                    onClick={() => handleResultClick(result)}
-                  >
-                    <div className="icon">{result.icon}</div>
-                    <div className="details">
-                      <div className="name">{result.name}</div>
-                      <div className="description">{result.description}</div>
-                    </div>
-                  </SearchResultItem>
-                ))
-              ) : (
-                <p>Aucun résultat trouvé.</p>
-              )}
-            </SearchResults>
-          )}
-        </SearchBar>
-
-        {/* Contrôles en bas de la page */}
-        <ControlPanel>
-          <Button onClick={centerOnLocation}>
-            <MdMyLocation size={20} style={{ marginRight: '5px' }} />
-            Ma position
-          </Button>
-          <Button onClick={() => togglePopup()}>
-            {isPopupOpen ? 'Fermer le popup' : 'Ouvrir le popup'}
-          </Button>
-          <Button onClick={() => toggleInfoPanel()}>
-            {showInfoPanel ? 'Masquer les infos' : 'Afficher les infos'}
-          </Button>
-        </ControlPanel>
       </MapWrapper>
+
+      {/* Panneau d'informations sur la localisation */}
+      {showInfoPanel && (
+        <InfoPanel>
+          <ContextualWindowController
+            isOpen={showInfoPanel}
+            toggleWindow={toggleInfoPanel}
+            title="Votre localisation"
+          >
+            <h3>Votre localisation</h3>
+            
+            <SectionTitle>Informations géographiques</SectionTitle>
+            <LocationInfo>
+              <FaMapMarkerAlt size={16} color="#FF4136" />
+              <span>Quartier: {locationInfo.neighborhood}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdLocationCity size={16} color="#0074D9" />
+              <span>Ville: {locationInfo.city}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdOutlinePublic size={16} color="#2ECC40" />
+              <span>Pays: {locationInfo.country}</span>
+            </LocationInfo>
+            
+            <SectionTitle>Données techniques</SectionTitle>
+            <LocationInfo>
+              <MdMyLocation size={16} color={markerColor} />
+              <span>Latitude: {locationInfo.latitude}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdMyLocation size={16} color={markerColor} />
+              <span>Longitude: {locationInfo.longitude}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdTerrain size={16} color="#B10DC9" />
+              <span>Altitude: {locationInfo.altitude}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdSpeed size={16} color="#FF851B" />
+              <span>Vitesse: {locationInfo.speed}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdNetworkWifi size={16} color="#85144b" />
+              <span>Précision: {locationInfo.accuracy}</span>
+            </LocationInfo>
+            <LocationInfo>
+              <MdNetworkWifi size={16} color="#3D9970" />
+              <span>Adresse IP: {locationInfo.ip}</span>
+            </LocationInfo>
+
+            {/* Historique des positions */}
+            {locationHistory.length > 0 && (
+              <HistoryContainer>
+                <SectionTitle>
+                  <FaHistory size={16} color="#AAAAAA" />
+                  Historique des positions
+                </SectionTitle>
+                {locationHistory.map((item, index) => (
+                  <HistoryItem 
+                    key={item.id} 
+                    onClick={() => goToHistoricalPosition(item)}
+                  >
+                    {formatTime(item.timestamp)} - 
+                    Lat: {item.position.lat.toFixed(4)}, 
+                    Lng: {item.position.lng.toFixed(4)}
+                  </HistoryItem>
+                ))}
+              </HistoryContainer>
+            )}
+          </ContextualWindowController>
+        </InfoPanel>
+      )}
+
+      {/* Barre de recherche située dans le footer */}
+      <SearchBar>
+        <SearchCategories>
+          <CategoryButton
+            active={activeCategory === 'all'}
+            onClick={() => setActiveCategory('all')}
+          >
+            <MdSearch /> Tous
+          </CategoryButton>
+          <CategoryButton
+            active={activeCategory === 'cities'}
+            onClick={() => setActiveCategory('cities')}
+          >
+            <FaCity /> Villes
+          </CategoryButton>
+          <CategoryButton
+            active={activeCategory === 'regions'}
+            onClick={() => setActiveCategory('regions')}
+          >
+            <MdTerrain /> Régions
+          </CategoryButton>
+          <CategoryButton
+            active={activeCategory === 'users'}
+            onClick={() => setActiveCategory('users')}
+          >
+            <FaUsers /> Utilisateurs
+          </CategoryButton>
+        </SearchCategories>
+        <SearchInput showResults={showSearchResults}>
+          <input
+            type="text"
+            placeholder="Rechercher des villes, quartiers, régions, ou utilisateurs..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <button onClick={handleSearch} disabled={isSearching}>
+            <MdSearch size={20} />
+            {isSearching ? 'Recherche...' : 'Rechercher'}
+          </button>
+        </SearchInput>
+        {showSearchResults && (
+          <SearchResults>
+            {searchResults.length > 0 ? (
+              searchResults.map((result) => (
+                <SearchResultItem
+                  key={result.id}
+                  onClick={() => handleResultClick(result)}
+                >
+                  <div className="icon">{result.icon}</div>
+                  <div className="details">
+                    <div className="name">{result.name}</div>
+                    <div className="description">{result.description}</div>
+                  </div>
+                </SearchResultItem>
+              ))
+            ) : (
+              <p>Aucun résultat trouvé.</p>
+            )}
+          </SearchResults>
+        )}
+      </SearchBar>
     </GeoSpaceContainer>
   );
 }
