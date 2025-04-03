@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, MdClose, MdColorLens, MdLogout } from 'react-icons/md';
-import { FaMapMarkerAlt, FaGoogle, FaHistory } from 'react-icons/fa';
+import { MdMyLocation, MdLocationCity, MdOutlinePublic, MdTerrain, MdSpeed, MdNetworkWifi, MdClose, MdColorLens, MdLogout, MdSearch, MdPerson } from 'react-icons/md';
+import { FaMapMarkerAlt, FaGoogle, FaHistory, FaUsers, FaCity, FaMapMarked } from 'react-icons/fa';
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
 import axios from 'axios';
@@ -31,12 +31,125 @@ const MapWrapper = styled.div`
 
 const ControlPanel = styled.div`
   position: absolute;
-  bottom: 20px;
+  bottom: 80px; // Modifié pour laisser de la place à la barre de recherche
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
   display: flex;
   gap: 10px;
+`;
+
+const SearchBar = styled.div`
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: 90%;
+  max-width: 600px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+`;
+
+const SearchInput = styled.div`
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: ${props => props.showResults ? "10px" : "0"};
+
+  input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+    outline: none;
+    &:focus {
+      border-color: #0066ff;
+    }
+  }
+
+  button {
+    background-color: #0066ff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 10px 15px;
+    margin-left: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    &:hover {
+      background-color: #0052cc;
+    }
+  }
+`;
+
+const SearchResults = styled.div`
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid #eee;
+`;
+
+const SearchResultItem = styled.div`
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  
+  &:hover {
+    background-color: #f5f5f5;
+  }
+  
+  .icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .details {
+    flex: 1;
+  }
+  
+  .name {
+    font-weight: bold;
+  }
+  
+  .description {
+    font-size: 12px;
+    color: #666;
+  }
+`;
+
+const SearchCategories = styled.div`
+  display: flex;
+  gap: 5px;
+  margin-bottom: 10px;
+`;
+
+const CategoryButton = styled.button`
+  background-color: ${props => props.active ? "#0066ff" : "#f0f0f0"};
+  color: ${props => props.active ? "white" : "#333"};
+  border: none;
+  border-radius: 15px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  
+  &:hover {
+    background-color: ${props => props.active ? "#0052cc" : "#e0e0e0"};
+  }
 `;
 
 const Button = styled.button`
@@ -251,8 +364,8 @@ const ContextualWindowController = ({ isOpen, toggleWindow, children, title }) =
   );
 };
 
-// Fonction pour créer une icône personnalisée basée sur un composant React et une couleur
-const createCustomIcon = (color = "#0066ff") => {
+// Fonction pour créer une icône personnalisée basée sur un composant React, une couleur et un nom d'utilisateur
+const createCustomIcon = (color = "#0066ff", username = null) => {
   const iconHtml = renderToString(
     <div style={{ 
       background: 'white', 
@@ -260,30 +373,45 @@ const createCustomIcon = (color = "#0066ff") => {
       padding: '5px', 
       boxShadow: '0 0 5px rgba(0,0,0,0.3)',
       display: 'flex',
+      flexDirection: 'column',
       justifyContent: 'center',
       alignItems: 'center'
     }}>
       <MdMyLocation size={24} color={color} />
+      {username && (
+        <div style={{
+          fontSize: '10px',
+          fontWeight: 'bold',
+          marginTop: '2px',
+          textAlign: 'center',
+          maxWidth: '50px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap'
+        }}>
+          {username}
+        </div>
+      )}
     </div>
   );
 
   return L.divIcon({
     html: iconHtml,
     className: 'custom-location-icon',
-    iconSize: [34, 34],
-    iconAnchor: [17, 17]
+    iconSize: [40, 45], // Ajusté pour accommoder le nom d'utilisateur
+    iconAnchor: [20, 22]
   });
 };
 
 // Composant pour suivre la position actuelle
-function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOpen, togglePopup }) {
+function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOpen, togglePopup, username }) {
   const [position, setPosition] = useState(null);
   const [speed, setSpeed] = useState(null);
   const [altitude, setAltitude] = useState(null);
   const map = useMap();
   const markerRef = useRef(null);
 
-  const locationIcon = createCustomIcon(markerColor);
+  const locationIcon = createCustomIcon(markerColor, username);
   const watchIdRef = useRef(null);
 
   useEffect(() => {
@@ -340,12 +468,12 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
     }
   }, [isPopupOpen]);
 
-  // Mettre à jour l'icône lorsque la couleur change
+  // Mettre à jour l'icône lorsque la couleur ou le username change
   useEffect(() => {
     if (markerRef.current) {
-      markerRef.current.setIcon(createCustomIcon(markerColor));
+      markerRef.current.setIcon(createCustomIcon(markerColor, username));
     }
-  }, [markerColor]);
+  }, [markerColor, username]);
 
   return position === null ? null : (
     <Marker 
@@ -367,7 +495,7 @@ function LocationMarker({ onLocationFound, onNewPosition, markerColor, isPopupOp
       >
         <div>
           <PopupHeader>
-            <h3>Votre position actuelle</h3>
+            <h3>{username || 'Votre position actuelle'}</h3>
             <CloseButton onClick={() => togglePopup(false)}>
               <MdClose size={20} />
             </CloseButton>
@@ -405,6 +533,13 @@ function GeoSpace() {
   });
   const [locationHistory, setLocationHistory] = useState([]);
   const [userIp, setUserIp] = useState('');
+  
+  // États pour la barre de recherche
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [activeCategory, setActiveCategory] = useState('all'); // 'all', 'cities', 'users', 'regions'
+  const [showSearchResults, setShowSearchResults] = useState(false);
   
   // Vérifier si l'utilisateur est déjà connecté
   useEffect(() => {
@@ -610,6 +745,96 @@ function GeoSpace() {
     });
   };
 
+  // Fonction pour rechercher des lieux ou des utilisateurs
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setIsSearching(true);
+    setShowSearchResults(true);
+    
+    try {
+      // Rechercher des lieux via Nominatim
+      let results = [];
+      
+      if (activeCategory === 'all' || activeCategory === 'cities' || activeCategory === 'regions') {
+        const nominatimResponse = await axios.get(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&addressdetails=1`
+        );
+        
+        const places = nominatimResponse.data.map(item => {
+          let type = 'Lieu';
+          let icon = <FaMapMarked />;
+          
+          if (item.type === 'city' || item.type === 'town' || item.type === 'village' || 
+              (item.address && (item.address.city || item.address.town || item.address.village))) {
+            type = 'Ville';
+            icon = <FaCity />;
+          } else if (item.type === 'administrative' || item.type === 'state' || item.type === 'region' || 
+                    (item.address && item.address.state)) {
+            type = 'Région';
+            icon = <MdTerrain />;
+          }
+          
+          return {
+            id: item.place_id,
+            name: item.display_name.split(',')[0],
+            description: item.display_name,
+            type: type,
+            icon: icon,
+            position: {
+              lat: parseFloat(item.lat),
+              lng: parseFloat(item.lon)
+            }
+          };
+        });
+        
+        // Filtrer selon la catégorie sélectionnée
+        if (activeCategory === 'cities') {
+          results = [...results, ...places.filter(place => place.type === 'Ville')];
+        } else if (activeCategory === 'regions') {
+          results = [...results, ...places.filter(place => place.type === 'Région')];
+        } else {
+          results = [...results, ...places];
+        }
+      }
+      
+      // Ici vous pourriez ajouter la recherche d'utilisateurs si vous avez une API pour cela
+      if (activeCategory === 'all' || activeCategory === 'users') {
+        // Exemple: recherche d'utilisateurs fictive
+        const userResults = [
+          {
+            id: 'user1',
+            name: 'John Doe',
+            description: 'Utilisateur actif',
+            type: 'Utilisateur',
+            icon: <MdPerson />,
+            position: { lat: 48.85, lng: 2.35 }
+          },
+          // Ajoutez d'autres utilisateurs si nécessaire
+        ].filter(user => 
+          searchQuery.toLowerCase() === '' || 
+          user.name.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        
+        results = [...results, ...userResults];
+      }
+      
+      setSearchResults(results);
+    } catch (error) {
+      console.error('Erreur lors de la recherche:', error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Gérer le clic sur un résultat de recherche
+  const handleResultClick = (result) => {
+    setMapCenter([result.position.lat, result.position.lng]);
+    setZoom(14); // Zoom adapté pour voir la zone
+    setShowSearchResults(false);
+  };
+
   // Fonction pour centrer la carte sur une position de l'historique
   const goToHistoricalPosition = (position) => {
     setMapCenter([position.position.lat, position.position.lng]);
@@ -624,7 +849,7 @@ function GeoSpace() {
 
   // Fonction pour basculer l'état du popup
   const togglePopup = (state) => {
-        setIsPopupOpen(typeof state === 'boolean' ? state : !isPopupOpen);
+    setIsPopupOpen(typeof state === 'boolean' ? state : !isPopupOpen);
   };
   
   // Fonction pour basculer l'affichage du panneau d'information
@@ -691,13 +916,14 @@ function GeoSpace() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          {/* Marqueur de localisation actuelle */}
+          {/* Marqueur de localisation actuelle avec le nom d'utilisateur */}
           <LocationMarker 
             onLocationFound={handleLocationFound} 
             onNewPosition={handleNewPosition}
             markerColor={markerColor}
             isPopupOpen={isPopupOpen}
             togglePopup={togglePopup}
+            username={currentUser ? currentUser.name : null}
           />
           <MapController center={mapCenter} zoom={zoom} />
 
@@ -819,6 +1045,68 @@ function GeoSpace() {
             </ContextualWindowController>
           </InfoPanel>
         )}
+
+        {/* Barre de recherche située dans le footer */}
+        <SearchBar>
+          <SearchCategories>
+            <CategoryButton
+              active={activeCategory === 'all'}
+              onClick={() => setActiveCategory('all')}
+            >
+              <MdSearch /> Tous
+            </CategoryButton>
+            <CategoryButton
+              active={activeCategory === 'cities'}
+              onClick={() => setActiveCategory('cities')}
+            >
+              <FaCity /> Villes
+            </CategoryButton>
+            <CategoryButton
+              active={activeCategory === 'regions'}
+              onClick={() => setActiveCategory('regions')}
+            >
+              <MdTerrain /> Régions
+            </CategoryButton>
+            <CategoryButton
+              active={activeCategory === 'users'}
+              onClick={() => setActiveCategory('users')}
+            >
+              <FaUsers /> Utilisateurs
+            </CategoryButton>
+          </SearchCategories>
+          <SearchInput showResults={showSearchResults}>
+            <input
+              type="text"
+              placeholder="Rechercher des villes, quartiers, régions, ou utilisateurs..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <button onClick={handleSearch} disabled={isSearching}>
+              <MdSearch size={20} />
+              {isSearching ? 'Recherche...' : 'Rechercher'}
+            </button>
+          </SearchInput>
+          {showSearchResults && (
+            <SearchResults>
+              {searchResults.length > 0 ? (
+                searchResults.map((result) => (
+                  <SearchResultItem
+                    key={result.id}
+                    onClick={() => handleResultClick(result)}
+                  >
+                    <div className="icon">{result.icon}</div>
+                    <div className="details">
+                      <div className="name">{result.name}</div>
+                      <div className="description">{result.description}</div>
+                    </div>
+                  </SearchResultItem>
+                ))
+              ) : (
+                <p>Aucun résultat trouvé.</p>
+              )}
+            </SearchResults>
+          )}
+        </SearchBar>
 
         {/* Contrôles en bas de la page */}
         <ControlPanel>
