@@ -116,6 +116,6 @@ export const getUserLocations = async (userId) => {
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID };
+export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID, ID };
 
 

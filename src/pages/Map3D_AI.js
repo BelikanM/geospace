@@ -1,11 +1,27 @@
-// pages/Map3D.js
+// pages/Map3D_AI.js
 import React, { useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { databases, DATABASE_ID, COLLECTION_ID } from '../appwrite';
 
-function Building3D({ coords }) {
-  // Calculer le centre du polygone
+function Building3D_AI({ coords }) {
+  const [height, setHeight] = useState(5);
+
+  useEffect(() => {
+    // Appel à l'API Flask pour obtenir la hauteur prédite
+    fetch('http://10.72.46.239:5000/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coords })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.height) setHeight(data.height);
+      })
+      .catch(error => console.error("Erreur appel API Flask:", error));
+  }, [coords]);
+
+  // Calcul du centre du polygone
   let avgLat = 0, avgLon = 0;
   coords.forEach(([lat, lon]) => {
     avgLat += lat;
@@ -13,8 +29,7 @@ function Building3D({ coords }) {
   });
   avgLat /= coords.length;
   avgLon /= coords.length;
-  // Pour l'instant, hauteur aléatoire
-  const height = Math.random() * 10 + 5;
+
   return (
     <mesh position={[avgLon, height / 2, -avgLat]}>
       <boxBufferGeometry attach="geometry" args={[0.0005, height * 0.0001, 0.0005]} />
@@ -23,7 +38,7 @@ function Building3D({ coords }) {
   );
 }
 
-export default function Map3D() {
+export default function Map3D_AI() {
   const [buildings, setBuildings] = useState([]);
 
   useEffect(() => {
@@ -45,7 +60,7 @@ export default function Map3D() {
       <directionalLight position={[10, 10, 5]} intensity={1} />
       <OrbitControls />
       {buildings.map((coords, i) => (
-        <Building3D key={i} coords={coords} />
+        <Building3D_AI key={i} coords={coords} />
       ))}
     </Canvas>
   );
