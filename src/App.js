@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Switch, Route, Redirect } from 'react-router-dom';
 import NavBar from './components/NavBar';
 import GEOSPACE from './pages/GEOSPACE';
@@ -7,9 +7,21 @@ import METEO from './pages/METEO';
 import CHAT from './pages/CHAT';
 import Home from './pages/Home';
 import NotFound from './pages/NotFound';
+import SplashScreen from './components/SplashScreen'; // Ajout du splash
 import './App.css';
 
 function App() {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLoading(false), 6000); // 6s
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) {
+    return <SplashScreen />;
+  }
+
   return (
     <Router>
       <div className="App">
@@ -31,4 +43,3 @@ function App() {
 }
 
 export default App;
-
