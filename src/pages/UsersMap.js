@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import { Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { renderToString } from 'react-dom/server';
 import styled from 'styled-components';
@@ -7,7 +7,7 @@ import { MdPerson, MdPhone, MdClose, MdEmail, MdGroup } from 'react-icons/md';
 import { databases, DATABASE_ID, account } from './appwrite';
 import { ID, Query } from 'appwrite';
 
-// Styles pour le composant (inchangés)
+// Styles
 const PopupHeader = styled.div`
   display: flex;
   justify-content: space-between;
@@ -59,6 +59,19 @@ const UserButton = styled.button`
   }
 `;
 
+const RefreshButton = styled.button`
+  margin-top: 10px;
+  padding: 5px 10px;
+  background-color: #0074D9;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  &:hover {
+    background-color: #005fa3;
+  }
+`;
+
 const UsersPanel = styled.div`
   position: fixed;
   top: 10px;
@@ -74,7 +87,15 @@ const UsersPanel = styled.div`
   display: ${props => props.visible ? 'block' : 'none'};
 `;
 
-// Création d'une icône personnalisée pour les utilisateurs
+const SearchInput = styled.input`
+  width: 100%;
+  padding: 5px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+`;
+
+// Création d'une icône principale pour l'utilisateur
 const createUserIcon = (color = "#FF4136") => {
   const iconHtml = renderToString(
     <div style={{ 
@@ -98,17 +119,43 @@ const createUserIcon = (color = "#FF4136") => {
   });
 };
 
-// Nouvelle collection ID
+// Création d'une icône avatar pour les positions historiques
+const createAvatarIcon = (avatarUrl, hostName, color) => {
+  let content;
+  if (avatarUrl) {
+    content = `<div style="display:flex; flex-direction: column; align-items: center;">
+      <img src="${avatarUrl}" alt="${hostName}" style="width:24px; height:24px; border-radius:50%; border:2px solid ${color};" />
+      <span style="font-size:10px; color:${color};">${hostName}</span>
+    </div>`;
+  } else {
+    // Fallback avec une icône SVG simple
+    content = `<div style="display:flex; flex-direction: column; align-items: center;">
+      <svg width="24" height="24" fill="${color}" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+      </svg>
+      <span style="font-size:10px; color:${color};">${hostName}</span>
+    </div>`;
+  }
+  return L.divIcon({
+    html: content,
+    className: 'custom-avatar-icon',
+    iconSize: [30, 40],
+    iconAnchor: [15, 40]
+  });
+};
+
 const USERS_COLLECTION_ID = '67ec0ff5002cafd109d7';
 
 const UsersMap = () => {
   const [users, setUsers] = useState([]);
   const [showUsersPanel, setShowUsersPanel] = useState(false);
   const [openPopupId, setOpenPopupId] = useState(null);
-  const userIcon = createUserIcon();
   const [currentUser, setCurrentUser] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  // Stocker l'historique des positions pour chaque utilisateur
+  const [trajectories, setTrajectories] = useState({});
 
-  // Récupérer l'utilisateur actuellement connecté
+  // Récupérer l'utilisateur connecté
   useEffect(() => {
     const getCurrentUser = async () => {
       try {
@@ -118,46 +165,121 @@ const UsersMap = () => {
         console.error('Utilisateur non connecté:', error);
       }
     };
-
     getCurrentUser();
   }, []);
 
-  // Récupérer les utilisateurs de la collection spécifiée
+  // Définir la couleur de l'icône en fonction du statut
+  const getUserIconColor = (user) => {
+    if (currentUser && user.$id === currentUser.$id) {
+      return 'green'; // utilisateur courant
+    }
+    // Considère l'utilisateur en ligne si sa dernière position date de moins de 5 minutes
+    const lastUpdate = new Date(user.timestamp || user.$createdAt);
+    if ((new Date() - lastUpdate) < 5 * 60 * 1000) {
+      return 'blue';
+    }
+    return 'gray';
+  };
+
+  // Fonction de mise à jour de la position (automatique et manuelle)
+  const updatePosition = () => {
+    if (!currentUser) return;
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          await databases.updateDocument(
+            DATABASE_ID,
+            USERS_COLLECTION_ID,
+            currentUser.$id,
+            {
+              latitude,
+              longitude,
+              timestamp: new Date().toISOString(),
+            }
+          );
+          console.log('Position mise à jour pour:', currentUser.name);
+          // Mise à jour locale de la trajectoire pour l'utilisateur courant
+          setTrajectories(prev => {
+            const newTrajectories = { ...prev };
+            const pos = [latitude, longitude];
+            if (!newTrajectories[currentUser.$id]) {
+              newTrajectories[currentUser.$id] = [pos];
+            } else {
+              const lastPos = newTrajectories[currentUser.$id][newTrajectories[currentUser.$id].length - 1];
+              if (lastPos[0] !== latitude || lastPos[1] !== longitude) {
+                newTrajectories[currentUser.$id] = [...newTrajectories[currentUser.$id], pos];
+              }
+            }
+            return newTrajectories;
+          });
+        } catch (error) {
+          console.error("Erreur lors de la mise à jour de la position:", error);
+        }
+      },
+      (error) => {
+        console.error("Erreur géolocalisation:", error);
+      },
+      { enableHighAccuracy: true }
+    );
+  };
+
+  // Mise à jour automatique de la position toutes les 30 secondes
+  useEffect(() => {
+    if (currentUser) {
+      updatePosition(); // mise à jour initiale
+      const interval = setInterval(updatePosition, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
+
+  // Récupérer les utilisateurs et mettre à jour leurs trajectoires
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        // Récupérer tous les utilisateurs de la collection
         const response = await databases.listDocuments(
           DATABASE_ID,
           USERS_COLLECTION_ID
         );
-        
-        // Filtrer les utilisateurs qui ont des coordonnées géographiques
+        // Garder uniquement les utilisateurs ayant une localisation
         const usersWithLocation = response.documents.filter(
           user => user.latitude && user.longitude
         );
-        
         setUsers(usersWithLocation);
-        console.log('Utilisateurs récupérés:', usersWithLocation);
+        // Mettre à jour localement les trajectoires pour chaque utilisateur
+        setTrajectories(prev => {
+          const newTrajectories = { ...prev };
+          usersWithLocation.forEach(user => {
+            const pos = [user.latitude, user.longitude];
+            if (!newTrajectories[user.$id]) {
+              newTrajectories[user.$id] = [pos];
+            } else {
+              const lastPos = newTrajectories[user.$id][newTrajectories[user.$id].length - 1];
+              if (lastPos[0] !== user.latitude || lastPos[1] !== user.longitude) {
+                newTrajectories[user.$id] = [...newTrajectories[user.$id], pos];
+              }
+            }
+          });
+          return newTrajectories;
+        });
       } catch (error) {
         console.error('Erreur lors de la récupération des utilisateurs:', error);
       }
     };
-
     fetchUsers();
-    
-    // Rafraîchir la liste des utilisateurs toutes les 30 secondes
     const interval = setInterval(fetchUsers, 30000);
-    
     return () => clearInterval(interval);
   }, []);
 
+  // Filtrer les utilisateurs selon la recherche et le statut "en ligne"
+  const filteredUsers = users.filter(user => {
+    const name = user.name || '';
+    const isOnline = (new Date() - new Date(user.timestamp || user.$createdAt)) < 5 * 60 * 1000;
+    return name.toLowerCase().includes(searchQuery.toLowerCase()) && isOnline;
+  });
+
   const toggleUserPopup = (userId) => {
-    if (openPopupId === userId) {
-      setOpenPopupId(null);
-    } else {
-      setOpenPopupId(userId);
-    }
+    setOpenPopupId(openPopupId === userId ? null : userId);
   };
 
   const toggleUsersPanel = () => {
@@ -166,28 +288,43 @@ const UsersMap = () => {
 
   return (
     <>
-      {/* Bouton pour afficher/masquer le panneau des utilisateurs */}
+      {/* Bouton d'affichage/masquage du panneau des utilisateurs */}
       <UserButton onClick={toggleUsersPanel}>
         <MdGroup size={18} />
         {showUsersPanel ? 'Masquer les utilisateurs' : 'Afficher les utilisateurs'}
       </UserButton>
-      
-      {/* Panneau d'affichage de la liste des utilisateurs */}
+
+      {/* Panneau latéral avec barre de recherche et liste des utilisateurs */}
       <UsersPanel visible={showUsersPanel}>
         <PopupHeader>
-          <h3>Utilisateurs ({users.length})</h3>
+          <h3>Utilisateurs ({filteredUsers.length})</h3>
           <CloseButton onClick={() => setShowUsersPanel(false)}>
             <MdClose size={20} />
           </CloseButton>
         </PopupHeader>
-        
-        {users.length === 0 ? (
-          <p>Aucun utilisateur trouvé</p>
+
+        {/* Barre de recherche */}
+        <SearchInput 
+          type="text" 
+          placeholder="Rechercher un utilisateur…" 
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+
+        {/* Bouton pour mettre à jour manuellement la position */}
+        {currentUser && (
+          <RefreshButton onClick={updatePosition}>
+            Mettre à jour ma position
+          </RefreshButton>
+        )}
+
+        {filteredUsers.length === 0 ? (
+          <p>Aucun utilisateur en ligne trouvé</p>
         ) : (
-          users.map(user => (
+          filteredUsers.map(user => (
             <div key={user.$id} style={{ marginBottom: '10px', padding: '5px', borderBottom: '1px solid #eee' }}>
               <UserInfo>
-                <MdPerson size={16} color="#FF4136" />
+                <MdPerson size={16} color={getUserIconColor(user)} />
                 <span>{user.name || 'Utilisateur sans nom'}</span>
               </UserInfo>
               {user.phone && (
@@ -213,53 +350,68 @@ const UsersMap = () => {
           ))
         )}
       </UsersPanel>
-      
-      {/* Marqueurs pour chaque utilisateur sur la carte */}
-      {users.map(user => (
-        <Marker
-          key={user.$id}
-          position={[user.latitude, user.longitude]}
-          icon={userIcon}
-          eventHandlers={{
-            click: () => toggleUserPopup(user.$id)
-          }}
-        >
-          <Popup
-            autoPan={true}
-            closeButton={false}
-            open={openPopupId === user.$id}
-          >
-            <div>
-              <PopupHeader>
-                <h3>{user.name || 'Utilisateur'}</h3>
-                <CloseButton onClick={() => setOpenPopupId(null)}>
-                  <MdClose size={20} />
-                </CloseButton>
-              </PopupHeader>
-              <UserInfo>
-                <MdPerson size={16} color="#FF4136" />
-                <span>Nom: {user.name || 'Non renseigné'}</span>
-              </UserInfo>
-              {user.phone && (
-                <UserInfo>
-                  <MdPhone size={16} color="#0074D9" />
-                  <span>Téléphone: {user.phone}</span>
-                </UserInfo>
-              )}
-              {user.email && (
-                <UserInfo>
-                  <MdEmail size={16} color="#2ECC40" />
-                  <span>Email: {user.email}</span>
-                </UserInfo>
-              )}
-              <p>Dernière position: {new Date(user.timestamp || user.$createdAt).toLocaleString()}</p>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
+
+      {/* Affichage des marqueurs, trajets et positions historiques avec avatar */}
+      {users.map(user => {
+        const color = getUserIconColor(user);
+        const icon = createUserIcon(color);
+        return (
+          <React.Fragment key={user.$id}>
+            {/* Marqueur pour la position actuelle */}
+            <Marker
+              position={[user.latitude, user.longitude]}
+              icon={icon}
+              eventHandlers={{
+                click: () => toggleUserPopup(user.$id)
+              }}
+            >
+              <Popup autoPan={true} closeButton={false} open={openPopupId === user.$id}>
+                <div>
+                  <PopupHeader>
+                    <h3>{user.name || 'Utilisateur'}</h3>
+                    <CloseButton onClick={() => setOpenPopupId(null)}>
+                      <MdClose size={20} />
+                    </CloseButton>
+                  </PopupHeader>
+                  <UserInfo>
+                    <MdPerson size={16} color={color} />
+                    <span>Nom: {user.name || 'Non renseigné'}</span>
+                  </UserInfo>
+                  {user.phone && (
+                    <UserInfo>
+                      <MdPhone size={16} color="#0074D9" />
+                      <span>Téléphone: {user.phone}</span>
+                    </UserInfo>
+                  )}
+                  {user.email && (
+                    <UserInfo>
+                      <MdEmail size={16} color="#2ECC40" />
+                      <span>Email: {user.email}</span>
+                    </UserInfo>
+                  )}
+                  <p>Dernière position: {new Date(user.timestamp || user.$createdAt).toLocaleString()}</p>
+                </div>
+              </Popup>
+            </Marker>
+
+            {/* Polyline pour tracer la trajectoire */}
+            {trajectories[user.$id] && trajectories[user.$id].length > 1 && (
+              <Polyline positions={trajectories[user.$id]} color={color} />
+            )}
+
+            {/* Marqueurs pour chaque position historique (sauf la dernière, déjà affichée) */}
+            {trajectories[user.$id] && trajectories[user.$id].map((pos, idx) => {
+              if (idx === trajectories[user.$id].length - 1) return null;
+              const avatarIcon = createAvatarIcon(user.avatar, user.name || 'Utilisateur', color);
+              return (
+                <Marker key={`${user.$id}-historique-${idx}`} position={pos} icon={avatarIcon} />
+              );
+            })}
+          </React.Fragment>
+        );
+      })}
     </>
   );
 };
 
 export default UsersMap;
-
