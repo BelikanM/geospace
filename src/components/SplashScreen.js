@@ -1,6 +1,6 @@
 import React from 'react';
 import './SplashScreen.css';
-import logo from '../assets/2vG5dDYUgcQniUudazAdMPJvMlW.svg'; // Chemin relatif depuis le fichier actuel
+import logo from '../assets/2vG5dDYUgcQniUudazAdMPJvMlW.svg';
 
 function SplashScreen() {
   return (
@@ -9,3 +9,5 @@ function SplashScreen() {
     </div>
   );
 }
+
+export default SplashScreen;
