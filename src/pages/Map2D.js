@@ -1,6 +1,6 @@
 // pages/Map2D.js
 import React, { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, Circle, Polyline } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { databases, DATABASE_ID, COLLECTION_ID, ID } from './appwrite';
 import L from 'leaflet';
@@ -12,6 +12,7 @@ import 'leaflet-heatmap';
 // Icon fix pour Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+import iconComment from 'leaflet/dist/images/marker-icon-2x.png'; // Utiliser une autre icône pour les commentaires
 
 let DefaultIcon = L.icon({
   iconUrl: icon,
@@ -19,6 +20,16 @@ let DefaultIcon = L.icon({
   iconSize: [25, 41],
   iconAnchor: [12, 41]
 });
+
+let CommentIcon = L.icon({
+  iconUrl: iconComment,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [0, -41],
+  iconColor: 'gold'
+});
+
 L.Marker.prototype.options.icon = DefaultIcon;
 
 // Composant pour mettre à jour la vue de carte quand la position change
@@ -31,7 +42,7 @@ function MapUpdater({ center }) {
 }
 
 // Composant pour gérer la géolocalisation
-function LocationMarker({ setUserLocation }) {
+function LocationMarker({ setUserLocation, addToHistory }) {
   const [position, setPosition] = useState(null);
   const [accuracy, setAccuracy] = useState(null);
   const map = useMap();
@@ -48,6 +59,10 @@ function LocationMarker({ setUserLocation }) {
       setPosition(e.latlng);
       setAccuracy(e.accuracy);
       setUserLocation([e.latlng.lat, e.latlng.lng]);
+      
+      // Ajouter le point à l'historique de navigation
+      addToHistory([e.latlng.lat, e.latlng.lng]);
+      
       map.flyTo(e.latlng, Math.max(16, map.getZoom()));
     });
 
@@ -61,7 +76,7 @@ function LocationMarker({ setUserLocation }) {
       map.off('locationfound');
       map.off('locationerror');
     };
-  }, [map, setUserLocation]);
+  }, [map, setUserLocation, addToHistory]);
 
   return position ? (
     <>
@@ -95,8 +110,159 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     landUse: true
   });
   
+  // 1. Mode nuit / jour
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  // 2. Historique de navigation
+  const [navigationHistory, setNavigationHistory] = useState([]);
+  const [showNavigationHistory, setShowNavigationHistory] = useState(false);
+  
+  // 3. Commentaires sur la carte
+  const [comments, setComments] = useState([]);
+  const [showComments, setShowComments] = useState(true);
+  const [commentForm, setCommentForm] = useState({
+    show: false,
+    location: null,
+    comment: '',
+    rating: 3,
+    title: ''
+  });
+  
+  // 4. Favoris / lieux enregistrés
+  const [favorites, setFavorites] = useState([]);
+  const [showFavorites, setShowFavorites] = useState(true);
+  
+  // 5. Filtrage avancé
+  const [filters, setFilters] = useState({
+    showFilters: false,
+    types: {
+      residential: true,
+      commercial: true,
+      educational: true,
+      healthcare: true,
+      restaurant: true,
+      others: true
+    }
+  });
+  
   const mapRef = useRef(null);
   const heatmapLayerRef = useRef(null);
+  
+  // Gérer le mode jour/nuit automatiquement selon l'heure
+  useEffect(() => {
+    const checkDayNightMode = () => {
+      const hours = new Date().getHours();
+      // Mode nuit entre 19h et 6h du matin
+      setIsDarkMode(hours >= 19 || hours < 6);
+    };
+    
+    // Vérifier au démarrage
+    checkDayNightMode();
+    
+    // Vérifier toutes les heures
+    const interval = setInterval(checkDayNightMode, 3600000);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  // Charger les commentaires, favoris et historique depuis localStorage au démarrage
+  useEffect(() => {
+    const loadSavedData = () => {
+      try {
+        // Charger les commentaires
+        const savedComments = localStorage.getItem('mapComments');
+        if (savedComments) {
+          setComments(JSON.parse(savedComments));
+        }
+        
+        // Charger les favoris
+        const savedFavorites = localStorage.getItem('mapFavorites');
+        if (savedFavorites) {
+          setFavorites(JSON.parse(savedFavorites));
+        }
+        
+        // Charger l'historique de navigation
+        const savedHistory = localStorage.getItem('navigationHistory');
+        if (savedHistory) {
+          setNavigationHistory(JSON.parse(savedHistory));
+        }
+      } catch (error) {
+        console.error("Erreur lors du chargement des données sauvegardées:", error);
+      }
+    };
+    
+    loadSavedData();
+  }, []);
+  
+  // Fonction pour ajouter un point à l'historique
+  const addToHistory = (position) => {
+    // Limiter l'historique à 100 points pour éviter des problèmes de performance
+    const updatedHistory = [...navigationHistory, {
+      position,
+      timestamp: new Date().toISOString()
+    }].slice(-100);
+    
+    setNavigationHistory(updatedHistory);
+    localStorage.setItem('navigationHistory', JSON.stringify(updatedHistory));
+  };
+  
+  // Fonction pour ajouter un commentaire
+  const addComment = () => {
+    if (!commentForm.title || !commentForm.comment || !commentForm.location) {
+      alert("Veuillez remplir tous les champs");
+      return;
+    }
+    
+    const newComment = {
+      id: Date.now().toString(),
+      title: commentForm.title,
+      comment: commentForm.comment,
+      rating: commentForm.rating,
+      location: commentForm.location,
+      timestamp: new Date().toISOString()
+    };
+    
+    const updatedComments = [...comments, newComment];
+    setComments(updatedComments);
+    localStorage.setItem('mapComments', JSON.stringify(updatedComments));
+    
+    // Réinitialiser le formulaire
+    setCommentForm({
+      show: false,
+      location: null,
+      comment: '',
+      rating: 3,
+      title: ''
+    });
+  };
+  
+  // Fonction pour ajouter un favori
+  const toggleFavorite = (element) => {
+    const existingIndex = favorites.findIndex(fav => fav.id === element.id);
+    
+    let updatedFavorites;
+    if (existingIndex >= 0) {
+      // Supprimer des favoris
+      updatedFavorites = favorites.filter(fav => fav.id !== element.id);
+    } else {
+      // Ajouter aux favoris
+      updatedFavorites = [...favorites, {
+        id: element.id,
+        name: element.info.name || `${element.info.type} sans nom`,
+        type: element.info.type,
+        center: element.info.center,
+        timestamp: new Date().toISOString()
+      }];
+    }
+    
+    setFavorites(updatedFavorites);
+    localStorage.setItem('mapFavorites', JSON.stringify(updatedFavorites));
+  };
+  
+  // Vérifier si un élément est dans les favoris
+  const isFavorite = (elementId) => {
+    return favorites.some(fav => fav.id === elementId);
+  };
   
   const fetchMapData = async (lat, lon) => {
     setLoading(true);
@@ -307,6 +473,36 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     }
   }, [showHeatmap, analysisData]);
   
+  // Vérifier si un élément passe les filtres
+  const passesFilters = (info) => {
+    if (!filters.showFilters) return true;
+    
+    // Éducation
+    if (info.amenity === 'school' || info.amenity === 'university' || info.amenity === 'kindergarten') {
+      return filters.types.educational;
+    }
+    // Santé
+    else if (info.amenity === 'hospital' || info.amenity === 'clinic' || info.amenity === 'doctors') {
+      return filters.types.healthcare;
+    }
+    // Restaurants
+    else if (info.amenity === 'restaurant' || info.amenity === 'cafe' || info.amenity === 'bar') {
+      return filters.types.restaurant;
+    }
+    // Commerces
+    else if (info.amenity === 'shop' || info.tags?.shop) {
+      return filters.types.commercial;
+    }
+    // Résidentiel
+    else if (info.type === 'residential' || info.type === 'apartments') {
+      return filters.types.residential;
+    }
+    // Autres
+    else {
+      return filters.types.others;
+    }
+  };
+  
   const handleElementClick = (id) => {
     setSelectedElement(id);
   };
@@ -349,6 +545,16 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     });
   };
   
+  const toggleFilter = (filterType) => {
+    setFilters({
+      ...filters,
+      types: {
+        ...filters.types,
+        [filterType]: !filters.types[filterType]
+      }
+    });
+  };
+  
   // Fonction pour déterminer la couleur en fonction du type d'élément
   const getBuildingColor = (info) => {
     if (info.amenity === 'school' || info.amenity === 'university' || info.amenity === 'kindergarten') {
@@ -364,6 +570,15 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     } else {
       return '#777777'; // Gris par défaut
     }
+  };
+  
+  // Gérer le clic droit sur la carte pour ajouter un commentaire
+  const handleMapContextMenu = (e) => {
+    setCommentForm({
+      ...commentForm,
+      show: true,
+      location: [e.latlng.lat, e.latlng.lng]
+    });
   };
   
   return (
@@ -400,12 +615,100 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         </div>
       )}
       
+      {/* Formulaire pour ajouter un commentaire */}
+      {commentForm.show && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'white',
+          padding: '20px',
+          borderRadius: '8px',
+          boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+          zIndex: 1100,
+          width: '300px'
+        }}>
+          <h3>Ajouter un commentaire</h3>
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'block', marginBottom: '5px' }}>Titre:</label>
+            <input
+              type="text"
+              value={commentForm.title}
+              onChange={(e) => setCommentForm({...commentForm, title: e.target.value})}
+              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+            />
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'block', marginBottom: '5px' }}>Commentaire:</label>
+            <textarea
+              value={commentForm.comment}
+              onChange={(e) => setCommentForm({...commentForm, comment: e.target.value})}
+              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minHeight: '80px' }}
+            />
+          </div>
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', marginBottom: '5px' }}>Note (1-5):</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              {[1, 2, 3, 4, 5].map(rating => (
+                <button
+                  key={rating}
+                  onClick={() => setCommentForm({...commentForm, rating})}
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: commentForm.rating === rating ? '#4CAF50' : '#e0e0e0',
+                    color: commentForm.rating === rating ? 'white' : 'black',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {rating}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button
+              onClick={() => setCommentForm({...commentForm, show: false})}
+              style={{
+                padding: '8px 16px',
+                background: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Annuler
+            </button>
+            <button
+              onClick={addComment}
+              style={{
+                padding: '8px 16px',
+                background: '#4CAF50',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Ajouter
+            </button>
+          </div>
+        </div>
+      )}
+      
       <MapContainer 
         center={userLocation} 
         zoom={17} 
         style={{ height: "100%", width: "100%" }}
         whenCreated={mapInstance => {
           mapRef.current = mapInstance;
+          
+          // Ajouter l'événement de clic droit
+          mapInstance.on('contextmenu', handleMapContextMenu);
         }}
         contextmenu={true}
         contextmenuItems={[
@@ -414,19 +717,123 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             callback: (e) => {
               setUserLocation([e.latlng.lat, e.latlng.lng]);
             }
+          },
+          {
+            text: 'Ajouter un commentaire ici',
+            callback: (e) => {
+              setCommentForm({
+                ...commentForm,
+                show: true,
+                location: [e.latlng.lat, e.latlng.lng]
+              });
+            }
+          },
+          {
+            text: 'Ajouter ce lieu aux favoris',
+            callback: (e) => {
+              const newFavorite = {
+                id: `fav_${Date.now()}`,
+                name: 'Lieu marqué',
+                type: 'custom',
+                center: [e.latlng.lat, e.latlng.lng],
+                timestamp: new Date().toISOString()
+              };
+              
+              const updatedFavorites = [...favorites, newFavorite];
+              setFavorites(updatedFavorites);
+              localStorage.setItem('mapFavorites', JSON.stringify(updatedFavorites));
+            }
           }
         ]}
       >
-        <TileLayer 
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        />
+        {/* 1. Mode nuit / jour */}
+        {isDarkMode ? (
+          <TileLayer 
+            url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png" 
+            attribution='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          />
+        ) : (
+          <TileLayer 
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          />
+        )}
         
-        <LocationMarker setUserLocation={setUserLocation} />
+        <LocationMarker setUserLocation={setUserLocation} addToHistory={addToHistory} />
         <MapUpdater center={userLocation} />
         
+        {/* 2. Historique de navigation - trace GPS */}
+        {showNavigationHistory && navigationHistory.length > 1 && (
+          <Polyline 
+            positions={navigationHistory.map(point => point.position)} 
+            pathOptions={{ color: '#9d00ff', weight: 3, opacity: 0.7 }}
+          />
+        )}
+        
+        {/* 3. Commentaires sur la carte */}
+        {showComments && comments.map(comment => (
+          <Marker 
+            key={`comment-${comment.id}`} 
+            position={comment.location}
+            icon={CommentIcon}
+          >
+            <Popup>
+              <div>
+                <h3>{comment.title}</h3>
+                <div style={{ display: 'flex', marginBottom: '5px' }}>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <span key={i} style={{ color: i < comment.rating ? 'gold' : 'gray', marginRight: '2px' }}>★</span>
+                  ))}
+                </div>
+                <p>{comment.comment}</p>
+                <small>Ajouté le {new Date(comment.timestamp).toLocaleDateString()}</small>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+        
+        {/* 4. Afficher les favoris */}
+        {showFavorites && favorites.filter(fav => fav.type === 'custom').map(favorite => (
+          <Marker 
+            key={`fav-${favorite.id}`} 
+            position={favorite.center}
+            icon={L.divIcon({
+              html: '⭐',
+              className: 'favorite-marker',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })}
+          >
+            <Popup>
+              <div>
+                <h3>{favorite.name}</h3>
+                <p>Favori ajouté le {new Date(favorite.timestamp).toLocaleDateString()}</p>
+                <button 
+                  onClick={() => {
+                    const updatedFavorites = favorites.filter(fav => fav.id !== favorite.id);
+                    setFavorites(updatedFavorites);
+                    localStorage.setItem('mapFavorites', JSON.stringify(updatedFavorites));
+                  }}
+                  style={{
+                    padding: '5px 10px',
+                    background: '#f44336',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Supprimer
+                </button>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+        
+        {/* 5. Filtrage avancé - appliquer les filtres sur les bâtiments et autres éléments */}
+        
         {/* Afficher les bâtiments */}
-        {visibleLayers.buildings && buildings.map((building) => (
+        {visibleLayers.buildings && buildings.filter(building => passesFilters(building.info)).map((building) => (
           <Polygon 
             key={`building-${building.id}`}
             positions={building.coords} 
@@ -446,19 +853,34 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 {building.info.address && <p><strong>Adresse:</strong> {building.info.address}</p>}
                 {building.info.amenity && <p><strong>Équipement:</strong> {building.info.amenity}</p>}
                 {building.info.height && <p><strong>Hauteur:</strong> {building.info.height}</p>}
-                <button 
-                  onClick={() => createRouteTo(building.id)}
-                  style={{
-                    padding: '8px 12px',
-                    background: '#4285F4',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Itinéraire jusqu'ici
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px' }}>
+                  <button 
+                    onClick={() => createRouteTo(building.id)}
+                    style={{
+                      padding: '8px 12px',
+                      background: '#4285F4',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Itinéraire
+                  </button>
+                  <button 
+                    onClick={() => toggleFavorite(building)}
+                    style={{
+                      padding: '8px 12px',
+                      background: isFavorite(building.id) ? '#f44336' : '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isFavorite(building.id) ? 'Retirer favori' : 'Ajouter favori'}
+                  </button>
+                </div>
               </div>
             </Popup>
           </Polygon>
@@ -482,19 +904,34 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               <div className="road-popup">
                 <h3>{road.info.name || 'Route'}</h3>
                 <p><strong>Type:</strong> {road.info.type}</p>
-                <button 
-                  onClick={() => createRouteTo(road.id)}
-                  style={{
-                    padding: '8px 12px',
-                    background: '#4285F4',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Naviguer sur cette route
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px' }}>
+                  <button 
+                    onClick={() => createRouteTo(road.id)}
+                    style={{
+                      padding: '8px 12px',
+                      background: '#4285F4',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Naviguer
+                  </button>
+                  <button 
+                    onClick={() => toggleFavorite(road)}
+                    style={{
+                      padding: '8px 12px',
+                      background: isFavorite(road.id) ? '#f44336' : '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isFavorite(road.id) ? 'Retirer favori' : 'Ajouter favori'}
+                  </button>
+                </div>
               </div>
             </Popup>
           </Polygon>
@@ -519,6 +956,20 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               <div className="water-popup">
                 <h3>{waterBody.info.name || 'Plan d\'eau'}</h3>
                 <p><strong>Type:</strong> {waterBody.info.tags.water || 'Eau'}</p>
+                <button 
+                  onClick={() => toggleFavorite(waterBody)}
+                  style={{
+                    padding: '8px 12px',
+                    background: isFavorite(waterBody.id) ? '#f44336' : '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    marginTop: '8px'
+                  }}
+                >
+                  {isFavorite(waterBody.id) ? 'Retirer favori' : 'Ajouter favori'}
+                </button>
               </div>
             </Popup>
           </Polygon>
@@ -527,7 +978,8 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         {/* Afficher les terrains */}
         {visibleLayers.landUse && landUse.map((area) => {
           let fillColor = '#CCCCCC';
-          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor = '#99CC99';
+          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor
+          = '#99CC99';
           else if (area.info.tags.landuse === 'residential') fillColor = '#FFCCCC';
           else if (area.info.tags.landuse === 'industrial') fillColor = '#CCCCFF';
           else if (area.info.tags.landuse === 'commercial') fillColor = '#FFFFCC';
@@ -550,6 +1002,20 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 <div className="landuse-popup">
                   <h3>{area.info.name || 'Terrain'}</h3>
                   <p><strong>Type:</strong> {area.info.type}</p>
+                  <button 
+                    onClick={() => toggleFavorite(area)}
+                    style={{
+                      padding: '8px 12px',
+                      background: isFavorite(area.id) ? '#f44336' : '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      marginTop: '8px'
+                    }}
+                  >
+                    {isFavorite(area.id) ? 'Retirer favori' : 'Ajouter favori'}
+                  </button>
                 </div>
               </Popup>
             </Polygon>
@@ -602,6 +1068,14 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             /> 
             Terrains
           </label>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input 
+              type="checkbox" 
+              checked={showComments} 
+              onChange={() => setShowComments(!showComments)} 
+            /> 
+            Commentaires
+          </label>
           <label style={{ display: 'block', marginBottom: '10px' }}>
             <input 
               type="checkbox" 
@@ -610,7 +1084,91 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             /> 
             Densité (heatmap)
           </label>
+          <label style={{ display: 'block', marginBottom: '10px' }}>
+            <input 
+              type="checkbox" 
+              checked={showNavigationHistory} 
+              onChange={() => setShowNavigationHistory(!showNavigationHistory)} 
+            /> 
+            Historique de navigation
+          </label>
+          <label style={{ display: 'block', marginBottom: '10px' }}>
+            <input 
+              type="checkbox" 
+              checked={showFavorites} 
+              onChange={() => setShowFavorites(!showFavorites)}
+            /> 
+            Favoris
+          </label>
+          <button 
+            onClick={() => setFilters({ ...filters, showFilters: !filters.showFilters })}
+            style={{
+              padding: '8px 16px',
+              background: '#607D8B',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              marginTop: '10px',
+              width: '100%'
+            }}
+          >
+            {filters.showFilters ? 'Masquer les filtres' : 'Afficher les filtres'}
+          </button>
         </div>
+        {filters.showFilters && (
+          <div style={{ marginTop: '10px' }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>Types</div>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input 
+                type="checkbox"
+                checked={filters.types.residential}
+                onChange={() => toggleFilter('residential')}
+              />
+              Résidentiel
+            </label>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input 
+                type="checkbox"
+                checked={filters.types.commercial}
+                onChange={() => toggleFilter('commercial')}
+              />
+              Commercial
+            </label>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input 
+                type="checkbox"
+                checked={filters.types.educational}
+                onChange={() => toggleFilter('educational')}
+              />
+              Éducation
+            </label>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input 
+                type="checkbox"
+                checked={filters.types.healthcare}
+                onChange={() => toggleFilter('healthcare')}
+              />
+              Santé
+            </label>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input 
+                type="checkbox"
+                checked={filters.types.restaurant}
+                onChange={() => toggleFilter('restaurant')}
+              />
+              Restaurant
+            </label>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input 
+                type="checkbox"
+                checked={filters.types.others}
+                onChange={() => toggleFilter('others')}
+              />
+              Autres
+            </label>
+          </div>
+        )}
         <button 
           onClick={() => fetchMapData(userLocation[0], userLocation[1])}
           style={{
@@ -620,6 +1178,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             border: 'none',
             borderRadius: '4px',
             cursor: 'pointer',
+            marginTop: '10px',
             width: '100%'
           }}
         >
