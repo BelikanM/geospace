@@ -1,12 +1,13 @@
 // pages/Map2D.js
 import React, { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, Circle } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { databases, DATABASE_ID, COLLECTION_ID, ID } from './appwrite';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 import 'leaflet-contextmenu';
 import 'leaflet-contextmenu/dist/leaflet.contextmenu.css';
+import 'leaflet-heatmap';
 
 // Icon fix pour Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -70,7 +71,7 @@ function LocationMarker({ setUserLocation }) {
           Précision: {Math.round(accuracy)} mètres
         </Popup>
       </Marker>
-      <circle center={position} radius={accuracy} />
+      <Circle center={position} radius={accuracy} pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }} />
     </>
   ) : null;
 }
@@ -78,104 +79,239 @@ function LocationMarker({ setUserLocation }) {
 export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   const [userLocation, setUserLocation] = useState(initialCenter);
   const [buildings, setBuildings] = useState([]);
-  const [selectedBuilding, setSelectedBuilding] = useState(null);
-  const [buildingData, setBuildingData] = useState({});
+  const [roads, setRoads] = useState([]);
+  const [water, setWater] = useState([]);
+  const [landUse, setLandUse] = useState([]);
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [elementData, setElementData] = useState({});
   const [loading, setLoading] = useState(true);
-  const mapRef = useRef(null);
+  const [analysisData, setAnalysisData] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [visibleLayers, setVisibleLayers] = useState({
+    buildings: true,
+    roads: true,
+    water: true,
+    landUse: true
+  });
   
-  const fetchBuildingData = async (lat, lon) => {
+  const mapRef = useRef(null);
+  const heatmapLayerRef = useRef(null);
+  
+  const fetchMapData = async (lat, lon) => {
     setLoading(true);
     try {
-      // Récupérer les bâtiments avec Overpass API
+      // Récupérer les bâtiments, routes, eau et terrains avec Overpass API
+      const query = `
+        [out:json];
+        (
+          way[building](around:800,${lat},${lon});
+          way[highway][highway!~"footway|path|service|track"](around:800,${lat},${lon});
+          way[natural=water](around:800,${lat},${lon});
+          way[landuse](around:800,${lat},${lon});
+        );
+        out geom;
+      `;
+      
       const response = await fetch(
-        `https://overpass-api.de/api/interpreter?data=[out:json];way[building](around:500,${lat},${lon});out geom;`
+        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`
       );
       const data = await response.json();
       
-      // Mapper les bâtiments avec plus d'informations
-      const buildingsWithInfo = data.elements.map(el => {
+      const buildingsData = [];
+      const roadsData = [];
+      const waterData = [];
+      const landUseData = [];
+      const allElementsData = {};
+      
+      data.elements.forEach(el => {
+        if (!el.geometry || el.geometry.length < 3) return;
+        
         const coords = el.geometry.map(pt => [pt.lat, pt.lon]);
         
-        // Calculer le centre du bâtiment
+        // Calculer le centre de l'élément
         const center = coords.reduce(
           (acc, curr) => [acc[0] + curr[0]/coords.length, acc[1] + curr[1]/coords.length], 
           [0, 0]
         );
         
-        // Extraire plus d'informations sur le bâtiment
+        // Extraire les informations
         const info = {
           id: el.id,
-          name: el.tags?.name || 'Bâtiment sans nom',
-          type: el.tags?.building || 'Type inconnu',
+          name: el.tags?.name || '',
+          type: el.tags?.building || el.tags?.highway || el.tags?.natural || el.tags?.landuse || 'Type inconnu',
           address: el.tags['addr:street'] ? 
             `${el.tags['addr:housenumber'] || ''} ${el.tags['addr:street'] || ''}, ${el.tags['addr:postcode'] || ''}` 
-            : 'Adresse inconnue',
+            : '',
           amenity: el.tags?.amenity || '',
-          height: el.tags?.height || 'Inconnue',
-          center: center
+          height: el.tags?.height || '',
+          center: center,
+          tags: el.tags || {}
         };
         
-        return { 
+        const element = { 
           id: el.id,
           coords: coords, 
           info: info 
         };
+        
+        // Classifier et stocker
+        if (el.tags.building) {
+          buildingsData.push(element);
+        } else if (el.tags.highway) {
+          roadsData.push(element);
+        } else if (el.tags.natural === 'water') {
+          waterData.push(element);
+        } else if (el.tags.landuse) {
+          landUseData.push(element);
+        }
+        
+        allElementsData[el.id] = info;
       });
       
-      setBuildings(buildingsWithInfo);
+      setBuildings(buildingsData);
+      setRoads(roadsData);
+      setWater(waterData);
+      setLandUse(landUseData);
+      setElementData(allElementsData);
       
-      // Créer un objet indexé par ID pour un accès rapide
-      const buildingDataObj = {};
-      buildingsWithInfo.forEach(b => {
-        buildingDataObj[b.id] = b.info;
-      });
-      setBuildingData(buildingDataObj);
+      // Enregistrer les éléments dans Appwrite
+      saveElementsToAppwrite([...buildingsData, ...roadsData, ...waterData, ...landUseData]);
       
-      // Enregistrer les bâtiments dans Appwrite
-      saveBuildingsToAppwrite(buildingsWithInfo);
+      // Analyser les données avec l'API Flask
+      runAIAnalysis(lat, lon, buildingsData, roadsData, waterData, landUseData);
       
     } catch (error) {
-      console.error("Erreur lors de la récupération des bâtiments:", error);
-      alert("Problème lors du chargement des données des bâtiments.");
+      console.error("Erreur lors de la récupération des données:", error);
+      alert("Problème lors du chargement des données de la carte.");
     } finally {
       setLoading(false);
     }
   };
   
-  const saveBuildingsToAppwrite = async (buildings) => {
+  const saveElementsToAppwrite = async (elements) => {
     try {
-      const promises = buildings.map(building => {
+      const promises = elements.map(element => {
         return databases.createDocument(
           DATABASE_ID,
           COLLECTION_ID,
           ID.unique(),
           {
-            buildingId: building.id.toString(),
-            coords: JSON.stringify(building.coords),
-            info: JSON.stringify(building.info),
-            location: [building.info.center[0], building.info.center[1]],
+            elementId: element.id.toString(),
+            type: element.info.type,
+            coords: JSON.stringify(element.coords),
+            info: JSON.stringify(element.info),
+            location: [element.info.center[0], element.info.center[1]],
             timestamp: new Date().toISOString()
           }
         );
       });
       
       await Promise.all(promises);
-      console.log(`${buildings.length} bâtiments enregistrés dans la base de données`);
+      console.log(`${elements.length} éléments enregistrés dans la base de données`);
     } catch (error) {
-      console.error("Erreur lors de l'enregistrement des bâtiments:", error);
+      console.error("Erreur lors de l'enregistrement des éléments:", error);
     }
   };
   
-  // Quand la position de l'utilisateur change, mettre à jour les bâtiments
-  useEffect(() => {
-    fetchBuildingData(userLocation[0], userLocation[1]);
-  }, [userLocation]);
-  
-  const handleBuildingClick = (id) => {
-    setSelectedBuilding(id);
+  const runAIAnalysis = async (lat, lon, buildings, roads, water, landUse) => {
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch('http://localhost:5000/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          location: [lat, lon],
+          buildings: buildings,
+          roads: roads,
+          water: water,
+          landUse: landUse
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setAnalysisData(data);
+      
+      // Si la carte est prête et qu'on a des données de densité
+      if (mapRef.current && data.density_heatmap) {
+        updateHeatmap(data.density_heatmap);
+      }
+      
+    } catch (error) {
+      console.error("Erreur lors de l'analyse IA:", error);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
   
-  const createRouteToBuilding = (buildingId) => {
+  const updateHeatmap = (heatmapData) => {
+    const map = mapRef.current;
+    
+    // Supprimer l'ancienne heatmap si elle existe
+    if (heatmapLayerRef.current) {
+      map.removeLayer(heatmapLayerRef.current);
+    }
+    
+    // Formater les données pour la heatmap
+    const points = heatmapData.map(point => ({
+      lat: point[0],
+      lng: point[1],
+      value: point[2]
+    }));
+    
+    // Configurer la nouvelle heatmap
+    const heatmapConfig = {
+      radius: 25,
+      maxOpacity: 0.8,
+      scaleRadius: false,
+      useLocalExtrema: true,
+      latField: 'lat',
+      lngField: 'lng',
+      valueField: 'value'
+    };
+    
+    // Créer la nouvelle heatmap
+    const heatmapLayer = new L.HeatmapOverlay(heatmapConfig);
+    heatmapLayer.setData({
+      max: 10,
+      data: points
+    });
+    
+    // Ajouter la heatmap si l'option est activée
+    if (showHeatmap) {
+      map.addLayer(heatmapLayer);
+      heatmapLayerRef.current = heatmapLayer;
+    }
+  };
+  
+  // Quand la position de l'utilisateur change, mettre à jour les données
+  useEffect(() => {
+    fetchMapData(userLocation[0], userLocation[1]);
+  }, [userLocation]);
+  
+  // Gérer l'affichage de la heatmap quand le statut change
+  useEffect(() => {
+    if (mapRef.current && analysisData?.density_heatmap) {
+      if (showHeatmap) {
+        updateHeatmap(analysisData.density_heatmap);
+      } else if (heatmapLayerRef.current) {
+        mapRef.current.removeLayer(heatmapLayerRef.current);
+        heatmapLayerRef.current = null;
+      }
+    }
+  }, [showHeatmap, analysisData]);
+  
+  const handleElementClick = (id) => {
+    setSelectedElement(id);
+  };
+  
+  const createRouteTo = (elementId) => {
     if (!mapRef.current) return;
     const map = mapRef.current;
     
@@ -184,14 +320,14 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       map.removeControl(map._routingControl);
     }
     
-    const building = buildingData[buildingId];
-    if (!building) return;
+    const element = elementData[elementId];
+    if (!element) return;
     
     // Créer un nouvel itinéraire
     const routingControl = L.Routing.control({
       waypoints: [
         L.latLng(userLocation[0], userLocation[1]),
-        L.latLng(building.center[0], building.center[1])
+        L.latLng(element.center[0], element.center[1])
       ],
       routeWhileDragging: true,
       showAlternatives: true,
@@ -204,6 +340,30 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     }).addTo(map);
     
     map._routingControl = routingControl;
+  };
+  
+  const toggleLayer = (layer) => {
+    setVisibleLayers({
+      ...visibleLayers,
+      [layer]: !visibleLayers[layer]
+    });
+  };
+  
+  // Fonction pour déterminer la couleur en fonction du type d'élément
+  const getBuildingColor = (info) => {
+    if (info.amenity === 'school' || info.amenity === 'university' || info.amenity === 'kindergarten') {
+      return '#3388FF'; // Bleu pour éducation
+    } else if (info.amenity === 'hospital' || info.amenity === 'clinic' || info.amenity === 'doctors') {
+      return '#FF3333'; // Rouge pour santé
+    } else if (info.amenity === 'restaurant' || info.amenity === 'cafe' || info.amenity === 'bar') {
+      return '#FF9933'; // Orange pour restaurants
+    } else if (info.amenity === 'shop' || info.tags?.shop) {
+      return '#33CC33'; // Vert pour commerces
+    } else if (info.type === 'residential' || info.type === 'apartments') {
+      return '#CC33CC'; // Violet pour résidentiel  
+    } else {
+      return '#777777'; // Gris par défaut
+    }
   };
   
   return (
@@ -221,7 +381,22 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           alignItems: 'center',
           zIndex: 1000
         }}>
-          <div className="loading-spinner">Chargement des bâtiments...</div>
+          <div className="loading-spinner">Chargement des données cartographiques...</div>
+        </div>
+      )}
+      
+      {isAnalyzing && (
+        <div className="analyzing-overlay" style={{
+          position: 'absolute',
+          top: 10,
+          right: 10,
+          background: 'rgba(0,0,0,0.7)',
+          color: 'white',
+          padding: '10px',
+          borderRadius: '5px',
+          zIndex: 1000
+        }}>
+          <div>Analyse IA en cours...</div>
         </div>
       )}
       
@@ -235,7 +410,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         contextmenu={true}
         contextmenuItems={[
           {
-            text: 'Rafraîchir les bâtiments ici',
+            text: 'Analyser cette zone',
             callback: (e) => {
               setUserLocation([e.latlng.lat, e.latlng.lng]);
             }
@@ -250,28 +425,29 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         <LocationMarker setUserLocation={setUserLocation} />
         <MapUpdater center={userLocation} />
         
-        {buildings.map((building) => (
+        {/* Afficher les bâtiments */}
+        {visibleLayers.buildings && buildings.map((building) => (
           <Polygon 
-            key={building.id} 
+            key={`building-${building.id}`}
             positions={building.coords} 
             pathOptions={{ 
-              color: selectedBuilding === building.id ? "#FF5733" : "#00cc66",
-              weight: selectedBuilding === building.id ? 3 : 1.5, 
-              fillOpacity: 0.5 
+              color: selectedElement === building.id ? "#FF5733" : getBuildingColor(building.info),
+              weight: selectedElement === building.id ? 3 : 1.5, 
+              fillOpacity: 0.6 
             }} 
             eventHandlers={{
-              click: () => handleBuildingClick(building.id)
+              click: () => handleElementClick(building.id)
             }}
           >
             <Popup>
               <div className="building-popup">
-                <h3>{building.info.name}</h3>
+                <h3>{building.info.name || 'Bâtiment'}</h3>
                 <p><strong>Type:</strong> {building.info.type}</p>
-                <p><strong>Adresse:</strong> {building.info.address}</p>
+                {building.info.address && <p><strong>Adresse:</strong> {building.info.address}</p>}
                 {building.info.amenity && <p><strong>Équipement:</strong> {building.info.amenity}</p>}
                 {building.info.height && <p><strong>Hauteur:</strong> {building.info.height}</p>}
                 <button 
-                  onClick={() => createRouteToBuilding(building.id)}
+                  onClick={() => createRouteTo(building.id)}
                   style={{
                     padding: '8px 12px',
                     background: '#4285F4',
@@ -287,11 +463,104 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             </Popup>
           </Polygon>
         ))}
+        
+        {/* Afficher les routes */}
+        {visibleLayers.roads && roads.map((road) => (
+          <Polygon 
+            key={`road-${road.id}`}
+            positions={road.coords} 
+            pathOptions={{ 
+              color: selectedElement === road.id ? "#FF5733" : "#333333", 
+              weight: selectedElement === road.id ? 5 : 3,
+              fillOpacity: 0.2
+            }} 
+            eventHandlers={{
+              click: () => handleElementClick(road.id)
+            }}
+          >
+            <Popup>
+              <div className="road-popup">
+                <h3>{road.info.name || 'Route'}</h3>
+                <p><strong>Type:</strong> {road.info.type}</p>
+                <button 
+                  onClick={() => createRouteTo(road.id)}
+                  style={{
+                    padding: '8px 12px',
+                    background: '#4285F4',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Naviguer sur cette route
+                </button>
+              </div>
+            </Popup>
+          </Polygon>
+        ))}
+        
+        {/* Afficher les plans d'eau */}
+        {visibleLayers.water && water.map((waterBody) => (
+          <Polygon 
+            key={`water-${waterBody.id}`}
+            positions={waterBody.coords} 
+            pathOptions={{ 
+              color: selectedElement === waterBody.id ? "#FF5733" : "#0066CC", 
+              weight: selectedElement === waterBody.id ? 3 : 1,
+              fillColor: '#99CCFF',
+              fillOpacity: 0.6
+            }} 
+            eventHandlers={{
+              click: () => handleElementClick(waterBody.id)
+            }}
+          >
+            <Popup>
+              <div className="water-popup">
+                <h3>{waterBody.info.name || 'Plan d\'eau'}</h3>
+                <p><strong>Type:</strong> {waterBody.info.tags.water || 'Eau'}</p>
+              </div>
+            </Popup>
+          </Polygon>
+        ))}
+        
+        {/* Afficher les terrains */}
+        {visibleLayers.landUse && landUse.map((area) => {
+          let fillColor = '#CCCCCC';
+          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor = '#99CC99';
+          else if (area.info.tags.landuse === 'residential') fillColor = '#FFCCCC';
+          else if (area.info.tags.landuse === 'industrial') fillColor = '#CCCCFF';
+          else if (area.info.tags.landuse === 'commercial') fillColor = '#FFFFCC';
+          
+          return (
+            <Polygon 
+              key={`landuse-${area.id}`}
+              positions={area.coords} 
+              pathOptions={{ 
+                color: selectedElement === area.id ? "#FF5733" : "#666666", 
+                weight: selectedElement === area.id ? 3 : 1,
+                fillColor: fillColor,
+                fillOpacity: 0.4
+              }} 
+              eventHandlers={{
+                click: () => handleElementClick(area.id)
+              }}
+            >
+              <Popup>
+                <div className="landuse-popup">
+                  <h3>{area.info.name || 'Terrain'}</h3>
+                  <p><strong>Type:</strong> {area.info.type}</p>
+                </div>
+              </Popup>
+            </Polygon>
+          );
+        })}
       </MapContainer>
       
+      {/* Panneau de contrôle */}
       <div style={{
         position: 'absolute',
-        bottom: '20px',
+        top: '20px',
         left: '20px',
         background: 'white',
         padding: '10px',
@@ -299,20 +568,100 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
         zIndex: 1000
       }}>
+        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>Couches</div>
+        <div>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input 
+              type="checkbox" 
+              checked={visibleLayers.buildings} 
+              onChange={() => toggleLayer('buildings')} 
+            /> 
+            Bâtiments
+          </label>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input 
+              type="checkbox" 
+              checked={visibleLayers.roads} 
+              onChange={() => toggleLayer('roads')} 
+            /> 
+            Routes
+          </label>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input 
+              type="checkbox" 
+              checked={visibleLayers.water} 
+              onChange={() => toggleLayer('water')} 
+            /> 
+            Eau
+          </label>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input 
+              type="checkbox" 
+              checked={visibleLayers.landUse} 
+              onChange={() => toggleLayer('landUse')} 
+            /> 
+            Terrains
+          </label>
+          <label style={{ display: 'block', marginBottom: '10px' }}>
+            <input 
+              type="checkbox" 
+              checked={showHeatmap} 
+              onChange={() => setShowHeatmap(!showHeatmap)} 
+            /> 
+            Densité (heatmap)
+          </label>
+        </div>
         <button 
-          onClick={() => fetchBuildingData(userLocation[0], userLocation[1])}
+          onClick={() => fetchMapData(userLocation[0], userLocation[1])}
           style={{
             padding: '8px 16px',
             background: '#4CAF50',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            width: '100%'
           }}
         >
-          Actualiser les bâtiments
+          Actualiser
         </button>
       </div>
+      
+      {/* Panneau d'analyse */}
+      {analysisData && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          right: '20px',
+          background: 'white',
+          padding: '15px',
+          borderRadius: '5px',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+          zIndex: 1000,
+          maxWidth: '300px',
+          maxHeight: '400px',
+          overflow: 'auto'
+        }}>
+          <h3 style={{ margin: '0 0 10px 0' }}>Analyse de la zone</h3>
+          <div>
+            <p><strong>Bâtiments:</strong> {analysisData.stats.building_count}</p>
+            <p><strong>Routes:</strong> {analysisData.stats.road_count}</p>
+            <p><strong>Plans d'eau:</strong> {analysisData.stats.water_count}</p>
+            <p><strong>Densité urbaine:</strong> {analysisData.stats.urban_density_score}/10</p>
+            <p><strong>Accessibilité:</strong> {analysisData.stats.accessibility_score}/10</p>
+          </div>
+          {analysisData.recommendations && (
+            <div>
+              <h4 style={{ marginBottom: '5px' }}>Recommandations</h4>
+              <ul style={{ margin: '0', paddingLeft: '20px' }}>
+                {analysisData.recommendations.map((rec, i) => (
+                  <li key={i}>{rec}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
