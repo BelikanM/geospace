@@ -978,8 +978,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         {/* Afficher les terrains */}
         {visibleLayers.landUse && landUse.map((area) => {
           let fillColor = '#CCCCCC';
-          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor
-          = '#99CC99';
+          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor          = '#99CC99';
           else if (area.info.tags.landuse === 'residential') fillColor = '#FFCCCC';
           else if (area.info.tags.landuse === 'industrial') fillColor = '#CCCCFF';
           else if (area.info.tags.landuse === 'commercial') fillColor = '#FFFFCC';
