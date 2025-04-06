@@ -1,5 +1,5 @@
 // pages/Map2D.js
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, Circle, Polyline } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { databases, DATABASE_ID, COLLECTION_ID, ID } from './appwrite';
@@ -8,11 +8,12 @@ import 'leaflet-routing-machine';
 import 'leaflet-contextmenu';
 import 'leaflet-contextmenu/dist/leaflet.contextmenu.css';
 import 'leaflet-heatmap';
+import debounce from 'lodash/debounce';
 
 // Icon fix pour Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-import iconComment from 'leaflet/dist/images/marker-icon-2x.png'; // Utiliser une autre icône pour les commentaires
+import iconComment from 'leaflet/dist/images/marker-icon-2x.png';
 
 let DefaultIcon = L.icon({
   iconUrl: icon,
@@ -99,7 +100,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   const [landUse, setLandUse] = useState([]);
   const [selectedElement, setSelectedElement] = useState(null);
   const [elementData, setElementData] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [analysisData, setAnalysisData] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -144,9 +145,24 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       others: true
     }
   });
+
+  // 6. Détails du plan d'urbanisme
+  const [urbanPlan, setUrbanPlan] = useState(null);
+  const [showUrbanPlan, setShowUrbanPlan] = useState(false);
+  
+  // 7. Données de l'écosystème
+  const [ecosystemData, setEcosystemData] = useState(null);
+
+  // 8. Dernière position analysée pour éviter des requêtes trop fréquentes
+  const [lastAnalyzedPosition, setLastAnalyzedPosition] = useState(null);
   
   const mapRef = useRef(null);
   const heatmapLayerRef = useRef(null);
+  const dataCacheRef = useRef({
+    lastFetch: null,
+    lastPosition: null,
+    isFetching: false
+  });
   
   // Gérer le mode jour/nuit automatiquement selon l'heure
   useEffect(() => {
@@ -185,6 +201,18 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         const savedHistory = localStorage.getItem('navigationHistory');
         if (savedHistory) {
           setNavigationHistory(JSON.parse(savedHistory));
+        }
+        
+        // Charger le plan d'urbanisme
+        const savedUrbanPlan = localStorage.getItem('urbanPlan');
+        if (savedUrbanPlan) {
+          setUrbanPlan(JSON.parse(savedUrbanPlan));
+        }
+        
+        // Charger les données d'écosystème
+        const savedEcosystemData = localStorage.getItem('ecosystemData');
+        if (savedEcosystemData) {
+          setEcosystemData(JSON.parse(savedEcosystemData));
         }
       } catch (error) {
         console.error("Erreur lors du chargement des données sauvegardées:", error);
@@ -263,9 +291,47 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   const isFavorite = (elementId) => {
     return favorites.some(fav => fav.id === elementId);
   };
-  
-  const fetchMapData = async (lat, lon) => {
+
+  // Vérifier si nous sommes trop près de la dernière position analysée
+  const isCloseToLastAnalyzedPosition = (newLat, newLon) => {
+    if (!lastAnalyzedPosition) return false;
+    
+    const [lastLat, lastLon] = lastAnalyzedPosition;
+    
+    // Calcul de la distance approximative en mètres
+    const R = 6371e3; // rayon de la Terre en mètres
+    const φ1 = lastLat * Math.PI/180;
+    const φ2 = newLat * Math.PI/180;
+    const Δφ = (newLat-lastLat) * Math.PI/180;
+    const Δλ = (newLon-lastLon) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+    
+    // Si moins de 200 mètres de différence, considérer comme trop proche
+    return distance < 200;
+  };
+
+  // Version optimisée de fetchMapData avec retardement et déduplication
+  const fetchMapData = useCallback(debounce(async (lat, lon, forceUpdate = false) => {
+    // Vérifier si nous avons déjà analysé cette zone récemment
+    if (!forceUpdate && isCloseToLastAnalyzedPosition(lat, lon)) {
+      console.log("Zone déjà analysée récemment. Utilisation des données en cache.");
+      return;
+    }
+    
+    // Vérifier si une requête est déjà en cours
+    if (dataCacheRef.current.isFetching) {
+      console.log("Une requête est déjà en cours. Annulation de cette requête.");
+      return;
+    }
+
+    dataCacheRef.current.isFetching = true;
     setLoading(true);
+    
     try {
       // Récupérer les bâtiments, routes, eau et terrains avec Overpass API
       const query = `
@@ -275,6 +341,8 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           way[highway][highway!~"footway|path|service|track"](around:800,${lat},${lon});
           way[natural=water](around:800,${lat},${lon});
           way[landuse](around:800,${lat},${lon});
+          node[amenity](around:800,${lat},${lon});
+          way[amenity](around:800,${lat},${lon});
         );
         out geom;
       `;
@@ -291,28 +359,43 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       const allElementsData = {};
       
       data.elements.forEach(el => {
-        if (!el.geometry || el.geometry.length < 3) return;
+        // Ignorer les nœuds qui ne sont pas des POI
+        if (el.type === 'node' && !el.tags?.amenity) return;
+
+        // Si c'est une voie, elle doit avoir une géométrie
+        if (el.type === 'way' && (!el.geometry || el.geometry.length < 3)) return;
         
-        const coords = el.geometry.map(pt => [pt.lat, pt.lon]);
-        
-        // Calculer le centre de l'élément
-        const center = coords.reduce(
-          (acc, curr) => [acc[0] + curr[0]/coords.length, acc[1] + curr[1]/coords.length], 
-          [0, 0]
-        );
+        let coords;
+        let center;
+
+        // Traitement selon le type d'élément
+        if (el.type === 'way') {
+          coords = el.geometry.map(pt => [pt.lat, pt.lon]);
+          
+          // Calculer le centre de l'élément
+          center = coords.reduce(
+            (acc, curr) => [acc[0] + curr[0]/coords.length, acc[1] + curr[1]/coords.length], 
+            [0, 0]
+          );
+        } else if (el.type === 'node') {
+          // Pour les nœuds, on utilise directement la position
+          coords = [[el.lat, el.lon]];
+          center = [el.lat, el.lon];
+        }
         
         // Extraire les informations
         const info = {
           id: el.id,
           name: el.tags?.name || '',
-          type: el.tags?.building || el.tags?.highway || el.tags?.natural || el.tags?.landuse || 'Type inconnu',
+          type: el.tags?.building || el.tags?.highway || el.tags?.natural || el.tags?.landuse || el.tags?.amenity || 'Type inconnu',
           address: el.tags['addr:street'] ? 
             `${el.tags['addr:housenumber'] || ''} ${el.tags['addr:street'] || ''}, ${el.tags['addr:postcode'] || ''}` 
             : '',
           amenity: el.tags?.amenity || '',
           height: el.tags?.height || '',
           center: center,
-          tags: el.tags || {}
+          tags: el.tags || {},
+          elementType: el.type // 'way' ou 'node'
         };
         
         const element = { 
@@ -330,6 +413,11 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           waterData.push(element);
         } else if (el.tags.landuse) {
           landUseData.push(element);
+        } else if (el.tags.amenity && !el.tags.building) {
+          // POI qui ne sont pas des bâtiments
+          if (element.info.elementType === 'way') {
+            buildingsData.push(element); // Amenities délimités par des polygones
+          }
         }
         
         allElementsData[el.id] = info;
@@ -340,8 +428,9 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       setWater(waterData);
       setLandUse(landUseData);
       setElementData(allElementsData);
+      setLastAnalyzedPosition([lat, lon]);
       
-      // Enregistrer les éléments dans Appwrite
+      // Enregistrer les éléments dans Appwrite (en background)
       saveElementsToAppwrite([...buildingsData, ...roadsData, ...waterData, ...landUseData]);
       
       // Analyser les données avec l'API Flask
@@ -352,12 +441,18 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       alert("Problème lors du chargement des données de la carte.");
     } finally {
       setLoading(false);
+      dataCacheRef.current.isFetching = false;
+      dataCacheRef.current.lastFetch = new Date();
+      dataCacheRef.current.lastPosition = [lat, lon];
     }
-  };
+  }, 60000), [lastAnalyzedPosition]); // Délai de 60 secondes (1 minute) entre les analyses
   
   const saveElementsToAppwrite = async (elements) => {
     try {
-      const promises = elements.map(element => {
+      // Limiter le nombre d'éléments à sauvegarder pour éviter une surcharge
+      const elementsToSave = elements.slice(0, 100);
+      
+      const promises = elementsToSave.map(element => {
         return databases.createDocument(
           DATABASE_ID,
           COLLECTION_ID,
@@ -374,7 +469,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       });
       
       await Promise.all(promises);
-      console.log(`${elements.length} éléments enregistrés dans la base de données`);
+      console.log(`${elementsToSave.length} éléments enregistrés dans la base de données`);
     } catch (error) {
       console.error("Erreur lors de l'enregistrement des éléments:", error);
     }
@@ -393,7 +488,10 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           buildings: buildings,
           roads: roads,
           water: water,
-          landUse: landUse
+          landUse: landUse,
+          detailed: true, // Demander une analyse détaillée
+          generateUrbanPlan: true, // Demander un plan d'urbanisme
+          generateEcosystemData: true // Demander des données sur l'écosystème
         }),
       });
       
@@ -403,6 +501,18 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       
       const data = await response.json();
       setAnalysisData(data);
+      
+      // Mettre à jour les données du plan d'urbanisme si disponibles
+      if (data.urban_plan) {
+        setUrbanPlan(data.urban_plan);
+        localStorage.setItem('urbanPlan', JSON.stringify(data.urban_plan));
+      }
+      
+      // Mettre à jour les données d'écosystème si disponibles
+      if (data.ecosystem_data) {
+        setEcosystemData(data.ecosystem_data);
+        localStorage.setItem('ecosystemData', JSON.stringify(data.ecosystem_data));
+      }
       
       // Si la carte est prête et qu'on a des données de densité
       if (mapRef.current && data.density_heatmap) {
@@ -457,9 +567,37 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   };
   
   // Quand la position de l'utilisateur change, mettre à jour les données
+  // mais avec un traitement plus intelligent pour éviter les requêtes trop fréquentes
   useEffect(() => {
-    fetchMapData(userLocation[0], userLocation[1]);
-  }, [userLocation]);
+    // Vérifier si une mise à jour est nécessaire
+    const shouldUpdate = () => {
+      // Si c'est la première requête ou si nous forçons l'actualisation
+      if (!dataCacheRef.current.lastFetch) return true;
+      
+      // Si la dernière requête date de plus d'une minute
+      const minutesSinceLastFetch = (new Date() - dataCacheRef.current.lastFetch) / (1000 * 60);
+      if (minutesSinceLastFetch > 1) return true;
+      
+      // Si la position a changé significativement
+      if (dataCacheRef.current.lastPosition) {
+        const [lastLat, lastLon] = dataCacheRef.current.lastPosition;
+        const [newLat, newLon] = userLocation;
+        
+        // Calcul d'une distance approximative
+        const latDiff = Math.abs(lastLat - newLat);
+        const lonDiff = Math.abs(lastLon - newLon);
+        const distance = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 111000; // approximation en mètres
+        
+        return distance > 200; // Si on s'est déplacé de plus de 200 mètres
+      }
+      
+      return false;
+    };
+    
+    if (shouldUpdate()) {
+      fetchMapData(userLocation[0], userLocation[1]);
+    }
+  }, [userLocation, fetchMapData]);
   
   // Gérer l'affichage de la heatmap quand le statut change
   useEffect(() => {
@@ -580,6 +718,11 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       location: [e.latlng.lat, e.latlng.lng]
     });
   };
+
+  // Forcer une mise à jour des données
+  const handleForceRefresh = () => {
+    fetchMapData(userLocation[0], userLocation[1], true);
+  };
   
   return (
     <div className="map-container" style={{ position: 'relative', height: "100vh", width: "100%" }}>
@@ -611,7 +754,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           borderRadius: '5px',
           zIndex: 1000
         }}>
-          <div>Analyse IA en cours...</div>
+          <div>Analyse IA en cours... Cela peut prendre une minute.</div>
         </div>
       )}
       
@@ -791,7 +934,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             </Popup>
           </Marker>
         ))}
-        
         {/* 4. Afficher les favoris */}
         {showFavorites && favorites.filter(fav => fav.type === 'custom').map(favorite => (
           <Marker 
@@ -831,8 +973,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         ))}
         
         {/* 5. Filtrage avancé - appliquer les filtres sur les bâtiments et autres éléments */}
-        
-        {/* Afficher les bâtiments */}
         {visibleLayers.buildings && buildings.filter(building => passesFilters(building.info)).map((building) => (
           <Polygon 
             key={`building-${building.id}`}
@@ -888,7 +1028,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         
         {/* Afficher les routes */}
         {visibleLayers.roads && roads.map((road) => (
-          <Polygon 
+          <Polyline 
             key={`road-${road.id}`}
             positions={road.coords} 
             pathOptions={{ 
@@ -934,7 +1074,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 </div>
               </div>
             </Popup>
-          </Polygon>
+          </Polyline>
         ))}
         
         {/* Afficher les plans d'eau */}
@@ -978,8 +1118,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         {/* Afficher les terrains */}
         {visibleLayers.landUse && landUse.map((area) => {
           let fillColor = '#CCCCCC';
-          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor
-          = '#99CC99';
+          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor = '#99CC99';
           else if (area.info.tags.landuse === 'residential') fillColor = '#FFCCCC';
           else if (area.info.tags.landuse === 'industrial') fillColor = '#CCCCFF';
           else if (area.info.tags.landuse === 'commercial') fillColor = '#FFFFCC';
@@ -1100,6 +1239,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             /> 
             Favoris
           </label>
+          {/* Ajout d'un bouton pour déclencher une mise à jour forcée */}
           <button 
             onClick={() => setFilters({ ...filters, showFilters: !filters.showFilters })}
             style={{
@@ -1115,7 +1255,24 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           >
             {filters.showFilters ? 'Masquer les filtres' : 'Afficher les filtres'}
           </button>
+
+          <button 
+            onClick={handleForceRefresh}
+            style={{
+              padding: '8px 16px',
+              background: '#FF9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              marginTop: '10px',
+              width: '100%'
+            }}
+          >
+            Forcer la mise à jour
+          </button>
         </div>
+
         {filters.showFilters && (
           <div style={{ marginTop: '10px' }}>
             <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>Types</div>
@@ -1169,21 +1326,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             </label>
           </div>
         )}
-        <button 
-          onClick={() => fetchMapData(userLocation[0], userLocation[1])}
-          style={{
-            padding: '8px 16px',
-            background: '#4CAF50',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            marginTop: '10px',
-            width: '100%'
-          }}
-        >
-          Actualiser
-        </button>
       </div>
       
       {/* Panneau d'analyse */}
@@ -1217,6 +1359,20 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                   <li key={i}>{rec}</li>
                 ))}
               </ul>
+            </div>
+          )}
+          {/* Afficher le plan d'urbanisme si disponible */}
+          {urbanPlan && showUrbanPlan && (
+            <div style={{ marginTop: '15px' }}>
+              <h4>Plan d'urbanisme</h4>
+              <p>{urbanPlan}</p>
+            </div>
+          )}
+          {/* Afficher les données d'écosystème si disponibles */}
+          {ecosystemData && (
+            <div style={{ marginTop: '15px' }}>
+              <h4>Écosystème</h4>
+              <p>{ecosystemData}</p>
             </div>
           )}
         </div>
