@@ -266,152 +266,205 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   
   const fetchMapData = async (lat, lon) => {
     setLoading(true);
-    try {
-      // Récupérer les bâtiments, routes, eau et terrains avec Overpass API
-      const query = `
-        [out:json];
-        (
-          way[building](around:800,${lat},${lon});
-          way[highway][highway!~"footway|path|service|track"](around:800,${lat},${lon});
-          way[natural=water](around:800,${lat},${lon});
-          way[landuse](around:800,${lat},${lon});
-        );
-        out geom;
-      `;
-      
-      const response = await fetch(
-        `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`
-      );
-      const data = await response.json();
-      
-      const buildingsData = [];
-      const roadsData = [];
-      const waterData = [];
-      const landUseData = [];
-      const allElementsData = {};
-      
-      data.elements.forEach(el => {
-        if (!el.geometry || el.geometry.length < 3) return;
-        
-        const coords = el.geometry.map(pt => [pt.lat, pt.lon]);
-        
-        // Calculer le centre de l'élément
-        const center = coords.reduce(
-          (acc, curr) => [acc[0] + curr[0]/coords.length, acc[1] + curr[1]/coords.length], 
-          [0, 0]
-        );
-        
-        // Extraire les informations
-        const info = {
-          id: el.id,
-          name: el.tags?.name || '',
-          type: el.tags?.building || el.tags?.highway || el.tags?.natural || el.tags?.landuse || 'Type inconnu',
-          address: el.tags['addr:street'] ? 
-            `${el.tags['addr:housenumber'] || ''} ${el.tags['addr:street'] || ''}, ${el.tags['addr:postcode'] || ''}` 
-            : '',
-          amenity: el.tags?.amenity || '',
-          height: el.tags?.height || '',
-          center: center,
-          tags: el.tags || {}
-        };
-        
-        const element = { 
-          id: el.id,
-          coords: coords, 
-          info: info 
-        };
-        
-        // Classifier et stocker
-        if (el.tags.building) {
-          buildingsData.push(element);
-        } else if (el.tags.highway) {
-          roadsData.push(element);
-        } else if (el.tags.natural === 'water') {
-          waterData.push(element);
-        } else if (el.tags.landuse) {
-          landUseData.push(element);
+    
+    // Exécuter la récupération des données en arrière-plan
+    const fetchDataAsync = () => {
+      return new Promise(async (resolve, reject) => {
+        try {
+          // Récupérer les bâtiments, routes, eau et terrains avec Overpass API
+          const query = `
+            [out:json];
+            (
+              way[building](around:800,${lat},${lon});
+              way[highway][highway!~"footway|path|service|track"](around:800,${lat},${lon});
+              way[natural=water](around:800,${lat},${lon});
+              way[landuse](around:800,${lat},${lon});
+            );
+            out geom;
+          `;
+          
+          const response = await fetch(
+            `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`
+          );
+          const data = await response.json();
+          
+          const buildingsData = [];
+          const roadsData = [];
+          const waterData = [];
+          const landUseData = [];
+          const allElementsData = {};
+          
+          // Traitement des données en arrière-plan
+          data.elements.forEach(el => {
+            if (!el.geometry || el.geometry.length < 3) return;
+            
+            const coords = el.geometry.map(pt => [pt.lat, pt.lon]);
+            
+            // Calculer le centre de l'élément
+            const center = coords.reduce(
+              (acc, curr) => [acc[0] + curr[0]/coords.length, acc[1] + curr[1]/coords.length], 
+              [0, 0]
+            );
+            
+            // Extraire les informations
+            const info = {
+              id: el.id,
+              name: el.tags?.name || '',
+              type: el.tags?.building || el.tags?.highway || el.tags?.natural || el.tags?.landuse || 'Type inconnu',
+              address: el.tags['addr:street'] ? 
+                `${el.tags['addr:housenumber'] || ''} ${el.tags['addr:street'] || ''}, ${el.tags['addr:postcode'] || ''}` 
+                : '',
+              amenity: el.tags?.amenity || '',
+              height: el.tags?.height || '',
+              center: center,
+              tags: el.tags || {}
+            };
+            
+            const element = { 
+              id: el.id,
+              coords: coords, 
+              info: info 
+            };
+            
+            // Classifier et stocker
+            if (el.tags.building) {
+              buildingsData.push(element);
+            } else if (el.tags.highway) {
+              roadsData.push(element);
+            } else if (el.tags.natural === 'water') {
+              waterData.push(element);
+            } else if (el.tags.landuse) {
+              landUseData.push(element);
+            }
+            
+            allElementsData[el.id] = info;
+          });
+          
+          resolve({
+            buildings: buildingsData,
+            roads: roadsData,
+            water: waterData,
+            landUse: landUseData,
+            elementData: allElementsData
+          });
+        } catch (error) {
+          reject(error);
         }
-        
-        allElementsData[el.id] = info;
       });
-      
-      setBuildings(buildingsData);
-      setRoads(roadsData);
-      setWater(waterData);
-      setLandUse(landUseData);
-      setElementData(allElementsData);
-      
-      // Enregistrer les éléments dans Appwrite
-      saveElementsToAppwrite([...buildingsData, ...roadsData, ...waterData, ...landUseData]);
-      
-      // Analyser les données avec l'API Flask
-      runAIAnalysis(lat, lon, buildingsData, roadsData, waterData, landUseData);
-      
+    };
+
+    try {
+      // Exécuter la récupération des données en arrière-plan
+      fetchDataAsync()
+        .then(result => {
+          setBuildings(result.buildings);
+          setRoads(result.roads);
+          setWater(result.water);
+          setLandUse(result.landUse);
+          setElementData(result.elementData);
+          
+          // Enregistrer les éléments dans Appwrite en arrière-plan
+          saveElementsToAppwrite([...result.buildings, ...result.roads, ...result.water, ...result.landUse]);
+          
+          // Lancer l'analyse IA en arrière-plan
+          runAIAnalysis(lat, lon, result.buildings, result.roads, result.water, result.landUse);
+        })
+        .catch(error => {
+          console.error("Erreur lors de la récupération des données:", error);
+          alert("Problème lors du chargement des données de la carte.");
+        })
+        .finally(() => {
+          setLoading(false);
+        });
     } catch (error) {
       console.error("Erreur lors de la récupération des données:", error);
       alert("Problème lors du chargement des données de la carte.");
-    } finally {
       setLoading(false);
     }
   };
   
   const saveElementsToAppwrite = async (elements) => {
-    try {
-      const promises = elements.map(element => {
-        return databases.createDocument(
-          DATABASE_ID,
-          COLLECTION_ID,
-          ID.unique(),
-          {
-            elementId: element.id.toString(),
-            type: element.info.type,
-            coords: JSON.stringify(element.coords),
-            info: JSON.stringify(element.info),
-            location: [element.info.center[0], element.info.center[1]],
-            timestamp: new Date().toISOString()
-          }
-        );
-      });
-      
-      await Promise.all(promises);
-      console.log(`${elements.length} éléments enregistrés dans la base de données`);
-    } catch (error) {
-      console.error("Erreur lors de l'enregistrement des éléments:", error);
-    }
+    // Exécuter l'enregistrement en arrière-plan sans bloquer l'interface utilisateur
+    setTimeout(async () => {
+      try {
+        const promises = elements.map(element => {
+          return databases.createDocument(
+            DATABASE_ID,
+            COLLECTION_ID,
+            ID.unique(),
+            {
+              elementId: element.id.toString(),
+              type: element.info.type,
+              coords: JSON.stringify(element.coords),
+              info: JSON.stringify(element.info),
+              location: [element.info.center[0], element.info.center[1]],
+              timestamp: new Date().toISOString()
+            }
+          );
+        });
+        
+        await Promise.all(promises);
+        console.log(`${elements.length} éléments enregistrés dans la base de données`);
+      } catch (error) {
+        console.error("Erreur lors de l'enregistrement des éléments:", error);
+      }
+    }, 0);
   };
   
   const runAIAnalysis = async (lat, lon, buildings, roads, water, landUse) => {
     setIsAnalyzing(true);
-    try {
-      const response = await fetch('http://localhost:5000/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          location: [lat, lon],
-          buildings: buildings,
-          roads: roads,
-          water: water,
-          landUse: landUse
-        }),
+    
+    // Créer un worker pour exécuter l'analyse en arrière-plan
+    const workerFunction = () => {
+      return new Promise((resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            const response = await fetch('http://localhost:5000/analyze', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                location: [lat, lon],
+                buildings: buildings,
+                roads: roads,
+                water: water,
+                landUse: landUse
+              }),
+            });
+            
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            resolve(data);
+          } catch (error) {
+            reject(error);
+          }
+        }, 0); // Exécution asynchrone sans délai réel
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      setAnalysisData(data);
-      
-      // Si la carte est prête et qu'on a des données de densité
-      if (mapRef.current && data.density_heatmap) {
-        updateHeatmap(data.density_heatmap);
-      }
-      
+    };
+    
+    try {
+      // Exécuter l'analyse en arrière-plan
+      workerFunction()
+        .then(data => {
+          setAnalysisData(data);
+          
+          // Si la carte est prête et qu'on a des données de densité
+          if (mapRef.current && data.density_heatmap) {
+            updateHeatmap(data.density_heatmap);
+          }
+        })
+        .catch(error => {
+          console.error("Erreur lors de l'analyse IA:", error);
+        })
+        .finally(() => {
+          setIsAnalyzing(false);
+        });
     } catch (error) {
       console.error("Erreur lors de l'analyse IA:", error);
-    } finally {
       setIsAnalyzing(false);
     }
   };
@@ -596,7 +649,16 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           alignItems: 'center',
           zIndex: 1000
         }}>
-          <div className="loading-spinner">Chargement des données cartographiques...</div>
+          <div className="loading-spinner" style={{
+            background: 'white',
+            padding: '20px',
+            borderRadius: '8px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Chargement des données cartographiques</div>
+            <div>La carte reste utilisable pendant le chargement</div>
+          </div>
         </div>
       )}
       
@@ -611,7 +673,10 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           borderRadius: '5px',
           zIndex: 1000
         }}>
-          <div>Analyse IA en cours...</div>
+          <div>
+            <div style={{ marginBottom: '5px' }}>Analyse IA en cours...</div>
+            <div style={{ fontSize: '0.9em', opacity: 0.8 }}>La carte reste entièrement fonctionnelle</div>
+          </div>
         </div>
       )}
       
@@ -919,6 +984,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                     Naviguer
                   </button>
                   <button 
+
                     onClick={() => toggleFavorite(road)}
                     style={{
                       padding: '8px 12px',
@@ -978,7 +1044,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         {/* Afficher les terrains */}
         {visibleLayers.landUse && landUse.map((area) => {
           let fillColor = '#CCCCCC';
-          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor          = '#99CC99';
+          if (area.info.tags.landuse === 'forest' || area.info.tags.landuse === 'wood') fillColor = '#99CC99';
           else if (area.info.tags.landuse === 'residential') fillColor = '#FFCCCC';
           else if (area.info.tags.landuse === 'industrial') fillColor = '#CCCCFF';
           else if (area.info.tags.landuse === 'commercial') fillColor = '#FFFFCC';
