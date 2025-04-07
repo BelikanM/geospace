@@ -99,7 +99,8 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   const [landUse, setLandUse] = useState([]);
   const [selectedElement, setSelectedElement] = useState(null);
   const [elementData, setElementData] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [analysisData, setAnalysisData] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -265,10 +266,12 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   };
   
   const fetchMapData = async (lat, lon) => {
+    // Indiquer que le chargement a commencé mais ne pas bloquer l'interface
     setLoading(true);
+    setLoadingProgress(10);
     
-    // Exécuter la récupération des données en arrière-plan
-    const fetchDataAsync = () => {
+    // Créer un worker pour exécuter la récupération en arrière-plan
+    const fetchDataWorker = () => {
       return new Promise(async (resolve, reject) => {
         try {
           // Récupérer les bâtiments, routes, eau et terrains avec Overpass API
@@ -283,10 +286,20 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             out geom;
           `;
           
+          // Mise à jour du progrès
+          setLoadingProgress(20);
+          
           const response = await fetch(
             `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`
           );
+          
+          // Mise à jour du progrès
+          setLoadingProgress(50);
+          
           const data = await response.json();
+          
+          // Mise à jour du progrès
+          setLoadingProgress(70);
           
           const buildingsData = [];
           const roadsData = [];
@@ -340,6 +353,9 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             allElementsData[el.id] = info;
           });
           
+          // Mise à jour finale du progrès
+          setLoadingProgress(90);
+          
           resolve({
             buildings: buildingsData,
             roads: roadsData,
@@ -354,32 +370,39 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     };
 
     try {
-      // Exécuter la récupération des données en arrière-plan
-      fetchDataAsync()
+      // Exécuter la récupération des données en arrière-plan sans bloquer l'interface
+      fetchDataWorker()
         .then(result => {
           setBuildings(result.buildings);
           setRoads(result.roads);
           setWater(result.water);
           setLandUse(result.landUse);
           setElementData(result.elementData);
+          setLoadingProgress(100);
           
           // Enregistrer les éléments dans Appwrite en arrière-plan
           saveElementsToAppwrite([...result.buildings, ...result.roads, ...result.water, ...result.landUse]);
           
           // Lancer l'analyse IA en arrière-plan
           runAIAnalysis(lat, lon, result.buildings, result.roads, result.water, result.landUse);
+          
+          // Terminer le chargement après un court délai pour que l'utilisateur voit le 100%
+          setTimeout(() => {
+            setLoading(false);
+            setLoadingProgress(0);
+          }, 500);
         })
         .catch(error => {
           console.error("Erreur lors de la récupération des données:", error);
           alert("Problème lors du chargement des données de la carte.");
-        })
-        .finally(() => {
           setLoading(false);
+          setLoadingProgress(0);
         });
     } catch (error) {
       console.error("Erreur lors de la récupération des données:", error);
       alert("Problème lors du chargement des données de la carte.");
       setLoading(false);
+      setLoadingProgress(0);
     }
   };
   
@@ -387,23 +410,28 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     // Exécuter l'enregistrement en arrière-plan sans bloquer l'interface utilisateur
     setTimeout(async () => {
       try {
-        const promises = elements.map(element => {
-          return databases.createDocument(
-            DATABASE_ID,
-            COLLECTION_ID,
-            ID.unique(),
-            {
-              elementId: element.id.toString(),
-              type: element.info.type,
-              coords: JSON.stringify(element.coords),
-              info: JSON.stringify(element.info),
-              location: [element.info.center[0], element.info.center[1]],
-              timestamp: new Date().toISOString()
-            }
-          );
-        });
-        
-        await Promise.all(promises);
+        // Traiter par lots de 50 éléments pour éviter une surcharge
+        const batchSize = 50;
+        for (let i = 0; i < elements.length; i += batchSize) {
+          const batch = elements.slice(i, i + batchSize);
+          const promises = batch.map(element => {
+            return databases.createDocument(
+              DATABASE_ID,
+              COLLECTION_ID,
+              ID.unique(),
+              {
+                elementId: element.id.toString(),
+                type: element.info.type,
+                coords: JSON.stringify(element.coords),
+                info: JSON.stringify(element.info),
+                location: [element.info.center[0], element.info.center[1]],
+                timestamp: new Date().toISOString()
+              }
+            );
+          });
+          
+          await Promise.all(promises);
+        }
         console.log(`${elements.length} éléments enregistrés dans la base de données`);
       } catch (error) {
         console.error("Erreur lors de l'enregistrement des éléments:", error);
@@ -636,28 +664,37 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
   
   return (
     <div className="map-container" style={{ position: 'relative', height: "100vh", width: "100%" }}>
+      {/* Indicateur de chargement non bloquant */}
       {loading && (
-        <div className="loading-overlay" style={{
+        <div className="loading-indicator" style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(255,255,255,0.7)',
+          top: '10px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(255,255,255,0.9)',
+          padding: '10px 15px',
+          borderRadius: '20px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+          zIndex: 1000,
           display: 'flex',
-          justifyContent: 'center',
           alignItems: 'center',
-          zIndex: 1000
+          pointerEvents: 'none' // Permet aux clics de passer à travers
         }}>
-          <div className="loading-spinner" style={{
-            background: 'white',
-            padding: '20px',
-            borderRadius: '8px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
-            textAlign: 'center'
+          <div style={{ marginRight: '10px' }}>Chargement des données ({loadingProgress}%)</div>
+          <div style={{ 
+            width: '100px', 
+            height: '8px', 
+            background: '#eee', 
+            borderRadius: '4px', 
+            overflow: 'hidden' 
           }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>Chargement des données cartographiques</div>
-            <div>La carte reste utilisable pendant le chargement</div>
+            <div style={{ 
+              width: `${loadingProgress}%`, 
+              height: '100%', 
+              background: '#4CAF50', 
+              borderRadius: '4px',
+              transition: 'width 0.3s ease' 
+            }}></div>
           </div>
         </div>
       )}
@@ -671,7 +708,8 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           color: 'white',
           padding: '10px',
           borderRadius: '5px',
-          zIndex: 1000
+          zIndex: 1000,
+          pointerEvents: 'none' // Permet aux clics de passer à travers
         }}>
           <div>
             <div style={{ marginBottom: '5px' }}>Analyse IA en cours...</div>
@@ -950,10 +988,10 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             </Popup>
           </Polygon>
         ))}
-        
+
         {/* Afficher les routes */}
         {visibleLayers.roads && roads.map((road) => (
-          <Polygon 
+          <Polyline 
             key={`road-${road.id}`}
             positions={road.coords} 
             pathOptions={{ 
@@ -983,8 +1021,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                   >
                     Naviguer
                   </button>
-                  <button 
-
+                  <button
                     onClick={() => toggleFavorite(road)}
                     style={{
                       padding: '8px 12px',
@@ -1000,9 +1037,9 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 </div>
               </div>
             </Popup>
-          </Polygon>
+          </Polyline>
         ))}
-        
+
         {/* Afficher les plans d'eau */}
         {visibleLayers.water && water.map((waterBody) => (
           <Polygon 
@@ -1040,7 +1077,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
             </Popup>
           </Polygon>
         ))}
-        
+
         {/* Afficher les terrains */}
         {visibleLayers.landUse && landUse.map((area) => {
           let fillColor = '#CCCCCC';
