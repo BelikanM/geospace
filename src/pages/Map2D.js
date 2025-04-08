@@ -81,20 +81,9 @@ function LocationMarker({ setUserLocation, addToHistory }) {
   return position ? (
     <>
       <Marker position={position}>
-        <Popup onClose={() => {}}>
+        <Popup>
           Votre position<br/>
           Précision: {Math.round(accuracy)} mètres
-          <button onClick={(e) => {
-            e.stopPropagation();
-            map.closePopup();
-          }} style={{
-            padding: '5px 10px',
-            background: '#aaa',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}>Fermer</button>
         </Popup>
       </Marker>
       <Circle center={position} radius={accuracy} pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }} />
@@ -122,14 +111,14 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     landUse: true
   });
   
-  // Mode nuit / jour
+  // 1. Mode nuit / jour
   const [isDarkMode, setIsDarkMode] = useState(false);
   
-  // Historique de navigation
+  // 2. Historique de navigation
   const [navigationHistory, setNavigationHistory] = useState([]);
   const [showNavigationHistory, setShowNavigationHistory] = useState(false);
   
-  // Commentaires sur la carte
+  // 3. Commentaires sur la carte
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(true);
   const [commentForm, setCommentForm] = useState({
@@ -140,11 +129,11 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     title: ''
   });
   
-  // Favoris / lieux enregistrés
+  // 4. Favoris / lieux enregistrés
   const [favorites, setFavorites] = useState([]);
   const [showFavorites, setShowFavorites] = useState(true);
   
-  // Filtrage avancé
+  // 5. Filtrage avancé
   const [filters, setFilters] = useState({
     showFilters: false,
     types: {
@@ -811,21 +800,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               Ajouter
             </button>
           </div>
-          <button 
-            onClick={() => setCommentForm({...commentForm, show: false})}
-            style={{
-              padding: '5px 10px',
-              background: '#aaa',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              marginTop: '10px',
-              width: '100%'
-            }}
-          >
-            Fermer
-          </button>
         </div>
       )}
       
@@ -875,7 +849,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           }
         ]}
       >
-        {/* Mode nuit / jour */}
+        {/* 1. Mode nuit / jour */}
         {isDarkMode ? (
           <TileLayer 
             url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png" 
@@ -891,7 +865,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
         <LocationMarker setUserLocation={setUserLocation} addToHistory={addToHistory} />
         <MapUpdater center={userLocation} />
         
-        {/* Historique de navigation - trace GPS */}
+        {/* 2. Historique de navigation - trace GPS */}
         {showNavigationHistory && navigationHistory.length > 1 && (
           <Polyline 
             positions={navigationHistory.map(point => point.position)} 
@@ -899,14 +873,14 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           />
         )}
         
-        {/* Commentaires sur la carte */}
+        {/* 3. Commentaires sur la carte */}
         {showComments && comments.map(comment => (
           <Marker 
             key={`comment-${comment.id}`} 
             position={comment.location}
             icon={CommentIcon}
           >
-            <Popup onClose={() => {}}>
+            <Popup>
               <div>
                 <h3>{comment.title}</h3>
                 <div style={{ display: 'flex', marginBottom: '5px' }}>
@@ -916,24 +890,12 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 </div>
                 <p>{comment.comment}</p>
                 <small>Ajouté le {new Date(comment.timestamp).toLocaleDateString()}</small>
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  mapRef.current.closePopup();
-                }} style={{
-                  padding: '5px 10px',
-                  background: '#aaa',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  marginTop: '10px'
-                }}>Fermer</button>
               </div>
             </Popup>
           </Marker>
         ))}
         
-        {/* Afficher les favoris */}
+        {/* 4. Afficher les favoris */}
         {showFavorites && favorites.filter(fav => fav.type === 'custom').map(favorite => (
           <Marker 
             key={`fav-${favorite.id}`} 
@@ -945,17 +907,15 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               iconAnchor: [12, 12]
             })}
           >
-            <Popup onClose={() => {}}>
+            <Popup>
               <div>
                 <h3>{favorite.name}</h3>
                 <p>Favori ajouté le {new Date(favorite.timestamp).toLocaleDateString()}</p>
                 <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
                     const updatedFavorites = favorites.filter(fav => fav.id !== favorite.id);
                     setFavorites(updatedFavorites);
                     localStorage.setItem('mapFavorites', JSON.stringify(updatedFavorites));
-                    mapRef.current.closePopup();
                   }}
                   style={{
                     padding: '5px 10px',
@@ -968,24 +928,12 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 >
                   Supprimer
                 </button>
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  mapRef.current.closePopup();
-                }} style={{
-                  padding: '5px 10px',
-                  background: '#aaa',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  marginTop: '10px'
-                }}>Fermer</button>
               </div>
             </Popup>
           </Marker>
         ))}
         
-        {/* Filtrage avancé - appliquer les filtres sur les bâtiments et autres éléments */}
+        {/* 5. Filtrage avancé - appliquer les filtres sur les bâtiments et autres éléments */}
         
         {/* Afficher les bâtiments */}
         {visibleLayers.buildings && buildings.filter(building => passesFilters(building.info)).map((building) => (
@@ -1001,7 +949,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               click: () => handleElementClick(building.id)
             }}
           >
-            <Popup onClose={() => {}}>
+            <Popup>
               <div className="building-popup">
                 <h3>{building.info.name || 'Bâtiment'}</h3>
                 <p><strong>Type:</strong> {building.info.type}</p>
@@ -1036,18 +984,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                     {isFavorite(building.id) ? 'Retirer favori' : 'Ajouter favori'}
                   </button>
                 </div>
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  mapRef.current.closePopup();
-                }} style={{
-                  padding: '5px 10px',
-                  background: '#aaa',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  marginTop: '20px'
-                }}>Fermer</button>
               </div>
             </Popup>
           </Polygon>
@@ -1067,7 +1003,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               click: () => handleElementClick(road.id)
             }}
           >
-            <Popup onClose={() => {}}>
+            <Popup>
               <div className="road-popup">
                 <h3>{road.info.name || 'Route'}</h3>
                 <p><strong>Type:</strong> {road.info.type}</p>
@@ -1099,18 +1035,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                     {isFavorite(road.id) ? 'Retirer favori' : 'Ajouter favori'}
                   </button>
                 </div>
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  mapRef.current.closePopup();
-                }} style={{
-                  padding: '5px 10px',
-                  background: '#aaa',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  marginTop: '20px'
-                }}>Fermer</button>
               </div>
             </Popup>
           </Polyline>
@@ -1131,7 +1055,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               click: () => handleElementClick(waterBody.id)
             }}
           >
-            <Popup onClose={() => {}}>
+            <Popup>
               <div className="water-popup">
                 <h3>{waterBody.info.name || 'Plan d\'eau'}</h3>
                 <p><strong>Type:</strong> {waterBody.info.tags.water || 'Eau'}</p>
@@ -1149,18 +1073,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 >
                   {isFavorite(waterBody.id) ? 'Retirer favori' : 'Ajouter favori'}
                 </button>
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  mapRef.current.closePopup();
-                }} style={{
-                  padding: '5px 10px',
-                  background: '#aaa',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  marginTop: '10px'
-                }}>Fermer</button>
               </div>
             </Popup>
           </Polygon>
@@ -1188,7 +1100,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                 click: () => handleElementClick(area.id)
               }}
             >
-              <Popup onClose={() => {}}>
+              <Popup>
                 <div className="landuse-popup">
                   <h3>{area.info.name || 'Terrain'}</h3>
                   <p><strong>Type:</strong> {area.info.type}</p>
@@ -1206,18 +1118,6 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
                   >
                     {isFavorite(area.id) ? 'Retirer favori' : 'Ajouter favori'}
                   </button>
-                  <button onClick={(e) => {
-                    e.stopPropagation();
-                    mapRef.current.closePopup();
-                  }} style={{
-                    padding: '5px 10px',
-                    background: '#aaa',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    marginTop: '10px'
-                  }}>Fermer</button>
                 </div>
               </Popup>
             </Polygon>
@@ -1243,9 +1143,8 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
               type="checkbox" 
               checked={visibleLayers.buildings} 
               onChange={() => toggleLayer('buildings')} 
-
-          /> 
-          Bâtiments
+            /> 
+            Bâtiments
           </label>
           <label style={{ display: 'block', marginBottom: '5px' }}>
             <input 
@@ -1404,21 +1303,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
           maxHeight: '400px',
           overflow: 'auto'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: '0 0 10px 0' }}>Analyse de la zone</h3>
-            <button 
-              onClick={() => setAnalysisData(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#f44336',
-                cursor: 'pointer',
-                fontSize: '1.2em'
-              }}
-            >
-              ✖️
-            </button>
-          </div>
+          <h3 style={{ margin: '0 0 10px 0' }}>Analyse de la zone</h3>
           <div>
             <p><strong>Bâtiments:</strong> {analysisData.stats.building_count}</p>
             <p><strong>Routes:</strong> {analysisData.stats.road_count}</p>
@@ -1441,4 +1326,5 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
     </div>
   );
 }
+
 
