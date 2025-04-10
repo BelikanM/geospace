@@ -1,4 +1,4 @@
-import { Client, Account, Databases, Storage, ID } from 'appwrite';
+import { Client, Account, Databases, Storage, ID, Query } from 'appwrite';
 
 // Appwrite configuration avec valeurs par défaut
 const AppwriteConfig = {
@@ -59,7 +59,7 @@ export const getCurrentUser = async () => {
   }
 };
 
-export const logoutUser = async () => {
+export const logout = async () => {
   try {
     return await account.deleteSession('current');
   } catch (error) {
@@ -101,13 +101,23 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
   }
 };
 
+// Función para guardar localización en lotes (batch)
+export const saveUserLocationBatch = async (userId, location, locationInfo) => {
+  // Implementar si es necesario
+};
+
+// Función para reenviar lotes fallidos
+export const retrySendFailedBatches = async () => {
+  // Implementar si es necesario
+};
+
 export const getUserLocations = async (userId) => {
   try {
     return await databases.listDocuments(
       DATABASE_ID,
       COLLECTION_ID,
       [
-        databases.queries.equal('user_id', userId)
+        Query.equal('user_id', userId)
       ]
     );
   } catch (error) {
@@ -116,6 +126,5 @@ export const getUserLocations = async (userId) => {
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID, ID };
-
+export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID, ID, Query };
 
