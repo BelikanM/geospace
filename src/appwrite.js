@@ -1,6 +1,5 @@
 import { Client, Account, Databases, Storage, ID, Query } from 'appwrite';
 
-// Appwrite configuration avec valeurs par défaut
 const AppwriteConfig = {
   endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
   projectId: process.env.REACT_APP_APPWRITE_PROJECT_ID || '67bb24ad002378e79e38',
@@ -9,25 +8,17 @@ const AppwriteConfig = {
   bucketId: process.env.REACT_APP_APPWRITE_BUCKET_ID || '67c698210004ee988ef1'
 };
 
-// Appwrite client configuration
 const client = new Client();
+client.setEndpoint(AppwriteConfig.endpoint).setProject(AppwriteConfig.projectId);
 
-// Vérification des valeurs avant utilisation
-client
-  .setEndpoint(AppwriteConfig.endpoint)
-  .setProject(AppwriteConfig.projectId);
-
-// Initialize services
 const account = new Account(client);
 const databases = new Databases(client);
 const storage = new Storage(client);
 
-// Database constants
 const DATABASE_ID = AppwriteConfig.databaseId;
 const COLLECTION_ID = AppwriteConfig.collectionId;
 const BUCKET_ID = AppwriteConfig.bucketId;
 
-// Auth functions
 export const createUser = async (email, password, name) => {
   try {
     const response = await account.create(ID.unique(), email, password, name);
@@ -68,10 +59,11 @@ export const logout = async () => {
   }
 };
 
-// Google OAuth login
+export const logoutUser = logout;
+
 export const loginWithGoogle = () => {
   try {
-    const redirectUrl = window.location.origin; // Current URL as redirect
+    const redirectUrl = window.location.origin;
     account.createOAuth2Session('google', redirectUrl, redirectUrl);
   } catch (error) {
     console.error('Error with Google login:', error);
@@ -79,7 +71,7 @@ export const loginWithGoogle = () => {
   }
 };
 
-// Location data functions
+// Functions for location
 export const saveUserLocation = async (userId, location, locationInfo) => {
   try {
     return await databases.createDocument(
@@ -101,24 +93,12 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
   }
 };
 
-// Función para guardar localización en lotes (batch)
-export const saveUserLocationBatch = async (userId, location, locationInfo) => {
-  // Implementar si es necesario
-};
-
-// Función para reenviar lotes fallidos
-export const retrySendFailedBatches = async () => {
-  // Implementar si es necesario
-};
-
 export const getUserLocations = async (userId) => {
   try {
     return await databases.listDocuments(
       DATABASE_ID,
       COLLECTION_ID,
-      [
-        Query.equal('user_id', userId)
-      ]
+      [Query.equal('user_id', userId)]
     );
   } catch (error) {
     console.error('Error getting locations:', error);
@@ -126,5 +106,14 @@ export const getUserLocations = async (userId) => {
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID, ID, Query };
-
+export {
+  client,
+  account,
+  databases,
+  storage,
+  DATABASE_ID,
+  COLLECTION_ID,
+  BUCKET_ID,
+  ID,
+  Query
+};
