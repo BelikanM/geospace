@@ -1,0 +1,165 @@
+/* Map.css - Styles de base pour le composant MapApp */
+
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  font-family: Arial, sans-serif;
+}
+
+.map-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  background-color: #333;
+  color: #fff;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.app-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.toggle-button, 
+.train-button {
+  background-color: #444;
+  color: #fff;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.toggle-button:hover, 
+.train-button:hover {
+  background-color: #555;
+}
+
+.app-container {
+  display: flex;
+  flex-grow: 1;
+}
+
+.app-sidebar {
+  width: 300px;
+  border-right: 1px solid #ddd;
+  padding: 15px;
+  overflow-y: auto;
+}
+
+.app-map {
+  flex-grow: 1;
+  position: relative;
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.form-group input[type="text"],
+.form-group textarea,
+.form-group select {
+  width: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.upload-button,
+.search-button {
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  padding: 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.upload-button:hover,
+.search-button:hover {
+  background-color: #0056b3;
+}
+
+.success-message {
+  color: #28a745;
+  margin-top: 10px;
+}
+
+.error-message {
+  color: #dc3545;
+  margin-top: 10px;
+}
+
+.model-stats,
+.search-history {
+  margin-top: 20px;
+}
+
+.model-stats ul,
+.input-group {
+  list-style-type: none;
+  padding: 0;
+}
+
+.model-stats ul li,
+.search-history ul li {
+  margin-bottom: 5px;
+}
+
+.search-history button {
+  background-color: #6c757d;
+  color: #fff;
+  border: none;
+  padding: 5px;
+  cursor: pointer;
+  margin-left: 10px;
+  transition: background-color 0.3s;
+}
+
+.search-history button:hover {
+  background-color: #5a6268;
+}
+
+.clear-history-button {
+  width: 100%;
+  background-color: #dc3545;
+  color: #fff;
+  border: none;
+  padding: 5px;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background-color 0.3s;
+}
+
+.clear-history-button:hover {
+  background-color: #bd2130;
+}
+
+.safety-icon span {
+  font-size: 24px;
+}
+
+.leaflet-popup-content {
+  font-size: 14px;
+}
+
