@@ -12,7 +12,6 @@ const AppwriteConfig = {
 // Appwrite client configuration
 const client = new Client();
 
-// Vérification des valeurs avant utilisation
 client
   .setEndpoint(AppwriteConfig.endpoint)
   .setProject(AppwriteConfig.projectId);
@@ -68,10 +67,13 @@ export const logout = async () => {
   }
 };
 
+// Alias logoutUser pour compatibilité
+export const logoutUser = logout;
+
 // Google OAuth login
 export const loginWithGoogle = () => {
   try {
-    const redirectUrl = window.location.origin; // Current URL as redirect
+    const redirectUrl = window.location.origin;
     account.createOAuth2Session('google', redirectUrl, redirectUrl);
   } catch (error) {
     console.error('Error with Google login:', error);
@@ -101,14 +103,12 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
   }
 };
 
-// Función para guardar localización en lotes (batch)
 export const saveUserLocationBatch = async (userId, location, locationInfo) => {
-  // Implementar si es necesario
+  // À implémenter si nécessaire
 };
 
-// Función para reenviar lotes fallidos
 export const retrySendFailedBatches = async () => {
-  // Implementar si es necesario
+  // À implémenter si nécessaire
 };
 
 export const getUserLocations = async (userId) => {
@@ -126,5 +126,14 @@ export const getUserLocations = async (userId) => {
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID, ID, Query };
-
+export {
+  client,
+  account,
+  databases,
+  storage,
+  DATABASE_ID,
+  COLLECTION_ID,
+  BUCKET_ID,
+  ID,
+  Query
+};

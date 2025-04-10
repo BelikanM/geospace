@@ -2,19 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Client, Account, Databases, Storage, ID, Query,
   getCurrentUser, logout, databases, storage, DATABASE_ID, BUCKET_ID 
-} from './appwrite'; // Correction: Utilisation de logout
+} from './appwrite'; // Importation de votre configuration Appwrite
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaUser, FaSignOutAlt, FaPaperPlane, FaImage, FaEllipsisV, FaMicrophone, FaVideo } from 'react-icons/fa';
 import { RiSpaceShipFill, RiAliensFill } from 'react-icons/ri';
 import { IoMdSend } from 'react-icons/io';
 import { GiStarfighter, GiRingedPlanet } from 'react-icons/gi';
 
-// Création d'un composant Divider si nécessaire
-const Divider = () => <hr style={{ border: 'none', borderTop: '1px solid var(--tertiary)', margin: '10px 0' }} />;
-
+// Création d'une nouvelle collection pour les messages
 const MESSAGES_COLLECTION_ID = '67ec0ff5002cafd109d8'; // Remplacez par votre ID de collection de messages
-const USERS_COLLECTION_ID = '67ec0ff5002cafd109d9';  // Remplacez par votre ID de collection d'utilisateurs
 
+// Palettes de couleurs futuristes
 const COLORS = {
   primary: '#05D9E8',
   secondary: '#FF2A6D',
@@ -28,6 +26,7 @@ const COLORS = {
   light: '#F5F5F5'
 };
 
+// Sons d'interface
 const SOUNDS = {
   messageSent: new Audio('/sounds/message-sent.mp3'),
   messageReceived: new Audio('/sounds/message-received.mp3'),
@@ -36,7 +35,9 @@ const SOUNDS = {
   userLeft: new Audio('/sounds/user-left.mp3')
 };
 
+// Fonction principale du chat
 const CHAT = () => {
+  // États
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -45,24 +46,33 @@ const CHAT = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('chats');
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [isUserOnline, setIsUserOnline] = useState({});
   const [mediaPreview, setMediaPreview] = useState(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [themeMode, setThemeMode] = useState('dark');
+  const [messageFilter, setMessageFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Références
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const chatContainerRef = useRef(null);
+  const audioRef = useRef(null);
+  
+  // Collection constante pour les utilisateurs
+  const USERS_COLLECTION_ID = '67ec0ff5002cafd109d9'; // Remplacez par votre ID de collection d'utilisateurs
 
+  // Effet pour charger le profil de l'utilisateur actuel
   useEffect(() => {
     const fetchCurrentUser = async () => {
       try {
         const user = await getCurrentUser();
         setCurrentUser(user);
         
+        // Mettre à jour le statut "en ligne" de l'utilisateur
         if (user) {
           await databases.updateDocument(
             DATABASE_ID,
@@ -74,6 +84,7 @@ const CHAT = () => {
             }
           );
         }
+        
         setIsLoading(false);
       } catch (error) {
         console.error("Erreur lors du chargement de l'utilisateur:", error);
@@ -83,6 +94,7 @@ const CHAT = () => {
 
     fetchCurrentUser();
     
+    // Nettoyage: définir isOnline à false lorsque l'utilisateur quitte
     return () => {
       if (currentUser) {
         databases.updateDocument(
@@ -98,6 +110,7 @@ const CHAT = () => {
     };
   }, []);
 
+  // Effet pour charger tous les utilisateurs
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -106,12 +119,14 @@ const CHAT = () => {
           USERS_COLLECTION_ID
         );
         
+        // Filtrer l'utilisateur actuel de la liste
         const otherUsers = response.documents.filter(
           user => currentUser && user.$id !== currentUser.$id
         );
         
         setUsers(otherUsers);
         
+        // Créer un objet pour le statut en ligne
         const onlineStatus = {};
         otherUsers.forEach(user => {
           onlineStatus[user.$id] = user.isOnline || false;
@@ -127,16 +142,19 @@ const CHAT = () => {
     if (currentUser) {
       fetchUsers();
       
-      const interval = setInterval(fetchUsers, 30000);
+      // Mettre en place un intervalle pour actualiser la liste des utilisateurs
+      const interval = setInterval(fetchUsers, 30000); // Actualiser toutes les 30 secondes
       return () => clearInterval(interval);
     }
   }, [currentUser]);
 
+  // Effet pour charger les messages lorsqu'un utilisateur est sélectionné
   useEffect(() => {
     const fetchMessages = async () => {
       if (!selectedUser || !currentUser) return;
       
       try {
+        // Créer un identifiant de conversation unique
         const conversationId = [currentUser.$id, selectedUser.$id].sort().join('_');
         
         const response = await databases.listDocuments(
@@ -150,6 +168,7 @@ const CHAT = () => {
         
         setMessages(response.documents);
         
+        // Marquer tous les messages comme lus
         response.documents.forEach(async (msg) => {
           if (msg.receiverId === currentUser.$id && !msg.read) {
             await databases.updateDocument(
@@ -168,6 +187,7 @@ const CHAT = () => {
 
     fetchMessages();
     
+    // Configurer une souscription en temps réel pour les nouveaux messages
     const unsubscribe = databases.subscribe(
       DATABASE_ID, 
       MESSAGES_COLLECTION_ID,
@@ -175,13 +195,16 @@ const CHAT = () => {
         if (response.events.includes('databases.*.collections.*.documents.*.create')) {
           const newMessage = response.payload;
           
+          // Vérifier si le message appartient à la conversation actuelle
           const conversationId = [currentUser.$id, selectedUser.$id].sort().join('_');
           if (newMessage.conversationId === conversationId) {
             setMessages(prevMessages => [...prevMessages, newMessage]);
             
+            // Jouer un son pour nouveau message
             if (newMessage.senderId !== currentUser.$id) {
               SOUNDS.messageReceived.play();
               
+              // Marquer comme lu si l'utilisateur est actif
               databases.updateDocument(
                 DATABASE_ID,
                 MESSAGES_COLLECTION_ID,
@@ -190,6 +213,7 @@ const CHAT = () => {
               );
             }
           } else if (newMessage.receiverId === currentUser.$id) {
+            // Notification pour un message d'un autre utilisateur
             const sender = users.find(user => user.$id === newMessage.senderId);
             if (sender) {
               setNotifications(prev => [
@@ -208,14 +232,17 @@ const CHAT = () => {
     };
   }, [selectedUser, currentUser]);
 
+  // Effet pour faire défiler vers le bas lorsque de nouveaux messages arrivent
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Fonction pour gérer la déconnexion
   const handleLogout = async () => {
     try {
       SOUNDS.buttonClick.play();
       
+      // Mettre à jour le statut en ligne
       if (currentUser) {
         await databases.updateDocument(
           DATABASE_ID,
@@ -235,15 +262,18 @@ const CHAT = () => {
     }
   };
 
+  // Fonction pour sélectionner un utilisateur
   const handleSelectUser = (user) => {
     SOUNDS.buttonClick.play();
     setSelectedUser(user);
     
+    // Supprimer les notifications de cet utilisateur
     setNotifications(prev => 
       prev.filter(notif => notif.userId !== user.$id)
     );
   };
 
+  // Fonction pour envoyer un message
   const sendMessage = async (e) => {
     e.preventDefault();
     
@@ -252,10 +282,12 @@ const CHAT = () => {
     try {
       SOUNDS.messageSent.play();
       
+      // Créer un identifiant de conversation unique
       const conversationId = [currentUser.$id, selectedUser.$id].sort().join('_');
       
       let mediaUrl = null;
       
+      // Télécharger le média si présent
       if (mediaPreview) {
         setUploadingMedia(true);
         
@@ -275,6 +307,7 @@ const CHAT = () => {
         setMediaPreview(null);
       }
       
+      // Créer le message
       const messageData = {
         conversationId,
         senderId: currentUser.$id,
@@ -302,11 +335,12 @@ const CHAT = () => {
     }
   };
 
+  // Fonction pour gérer le téléchargement de fichiers
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     
-    const fileType = file.type.split('/')[0];
+    const fileType = file.type.split('/')[0]; // 'image' ou 'video'
     const reader = new FileReader();
     
     reader.onloadend = () => {
@@ -320,14 +354,26 @@ const CHAT = () => {
     reader.readAsDataURL(file);
   };
 
+  // Fonction pour démarrer/arrêter l'enregistrement audio
   const toggleAudioRecording = () => {
     SOUNDS.buttonClick.play();
     
-    setIsRecordingAudio(!isRecordingAudio);
-    
-    // Add logic for MediaRecorder API if necessary
+    if (isRecordingAudio) {
+      // Arrêter l'enregistrement
+      setIsRecordingAudio(false);
+      
+      // Ici, vous ajouteriez la logique pour arrêter réellement l'enregistrement
+      // et préparer le fichier audio pour l'envoi
+    } else {
+      // Démarrer l'enregistrement
+      setIsRecordingAudio(true);
+      
+      // Ici, vous ajouteriez la logique pour démarrer l'enregistrement
+      // Vous auriez besoin d'accéder à l'API MediaRecorder
+    }
   };
   
+  // Fonction pour formater la date du dernier message
   const formatLastSeen = (dateString) => {
     if (!dateString) return "Il y a longtemps";
     
@@ -342,6 +388,7 @@ const CHAT = () => {
     return date.toLocaleDateString();
   };
 
+  // Composant pour le chargement
   const LoadingScreen = () => (
     <div className="loading-screen">
       <motion.div 
@@ -356,6 +403,7 @@ const CHAT = () => {
     </div>
   );
 
+  // Composant pour les notifications
   const NotificationSystem = () => (
     <div className="notification-container">
       <AnimatePresence>
@@ -381,10 +429,12 @@ const CHAT = () => {
     </div>
   );
 
+  // Si l'application est en train de charger
   if (isLoading) {
     return <LoadingScreen />;
   }
 
+  // Si aucun utilisateur n'est connecté, rediriger vers la page de connexion
   if (!currentUser) {
     return (
       <div className="login-redirect">
@@ -401,6 +451,7 @@ const CHAT = () => {
 
   return (
     <div className={`chat-container ${themeMode}`}>
+      {/* En-tête du chat */}
       <div className="chat-header">
         <div className="logo">
           <GiStarfighter size={28} />
@@ -426,6 +477,7 @@ const CHAT = () => {
       </div>
       
       <div className="chat-main">
+        {/* Barre latérale des utilisateurs */}
         <div className="users-sidebar">
           <div className="sidebar-header">
             <div className="tabs">
@@ -502,6 +554,7 @@ const CHAT = () => {
           </div>
         </div>
         
+        {/* Zone principale de chat */}
         <div className="chat-area">
           {selectedUser ? (
             <>
@@ -563,7 +616,11 @@ const CHAT = () => {
                     
                     return (
                       <React.Fragment key={msg.$id}>
-                        {showDate && <Divider />}
+                        {showDate && (
+                          <div className="date-separator">
+                            <span>{new Date(msg.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        )}
                         
                         <motion.div
                           initial={{ x: isCurrentUser ? 50 : -50, opacity: 0 }}
@@ -682,7 +739,9 @@ const CHAT = () => {
                   value={newMessage}
                   onChange={(e) => {
                     setNewMessage(e.target.value);
+                    // Simuler l'indication "est en train d'écrire"
                     if (!isTyping) {
+                      // Ici, vous pourriez envoyer un événement indiquant que l'utilisateur tape
                       setIsTyping(true);
                       setTimeout(() => setIsTyping(false), 2000);
                     }
@@ -727,9 +786,12 @@ const CHAT = () => {
         </div>
       </div>
       
+      {/* Système de notifications */}
       <NotificationSystem />
       
+      {/* Styles CSS en ligne */}
       <style jsx>{`
+        /* Réinitialisation et styles de base */
         * {
           box-sizing: border-box;
           margin: 0;
@@ -775,27 +837,29 @@ const CHAT = () => {
           text-shadow: var(--glow-effect);
         }
         
+        /* Loading Screen */
         .loading-screen {
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          height: 100vh;
+          height: 
+          100vh;
           background-color: var(--background);
           color: var(--light);
         }
-
+        
         .loading-icon {
           animation: 3s infinite spin linear;
         }
-
+        
         .loading-text {
           margin-top: 20px;
           font-size: 1.5em;
           color: var(--primary);
           text-shadow: var(--glow-effect);
         }
-
+        
         @keyframes spin {
           from {
             transform: rotate(0deg);
@@ -804,7 +868,8 @@ const CHAT = () => {
             transform: rotate(360deg);
           }
         }
-
+        
+        /* Styles de la boîte de notifications */
         .notification-container {
           position: fixed;
           bottom: 30px;
@@ -812,7 +877,7 @@ const CHAT = () => {
           z-index: 1000;
           width: 300px;
         }
-
+        
         .notification {
           background-color: var(--dark);
           padding: 10px 20px;
@@ -823,11 +888,11 @@ const CHAT = () => {
           align-items: center;
           cursor: pointer;
         }
-
+        
         .notification-icon {
           margin-right: 10px;
         }
-
+        
         .notification-badge {
           background-color: var(--secondary);
           border-radius: 50%;
@@ -838,14 +903,15 @@ const CHAT = () => {
           right: 20px;
           box-shadow: var(--glow-effect);
         }
-
+        
+        /* Styles du conteneur du chat */
         .chat-container {
           display: flex;
           flex-direction: column;
           height: 100vh;
           background: var(--gradient-bg);
         }
-
+        
         .chat-header {
           display: flex;
           justify-content: space-between;
@@ -854,22 +920,22 @@ const CHAT = () => {
           background-color: var(--dark-background);
           box-shadow: var(--box-shadow);
         }
-
+        
         .logo {
           display: flex;
           align-items: center;
           color: var(--light);
         }
-
+        
         .logo h1 {
           margin-left: 10px;
         }
-
+        
         .user-profile {
           display: flex;
           align-items: center;
         }
-
+        
         .user-avatar {
           position: relative;
           width: 40px;
@@ -879,7 +945,7 @@ const CHAT = () => {
           margin-right: 10px;
           box-shadow: var(--box-shadow);
         }
-
+        
         .status-indicator {
           position: absolute;
           bottom: 0;
@@ -889,25 +955,26 @@ const CHAT = () => {
           border-radius: 50%;
           border: 2px solid var(--background);
         }
-
+        
         .online {
           background-color: var(--success);
         }
-
+        
         .offline {
           background-color: var(--warning);
         }
-
+        
         .logout-button {
           font-size: 1.2em;
         }
-
+        
         .chat-main {
           display: flex;
           flex: 1;
           overflow: hidden;
         }
-
+        
+        /* Styles de la barre latérale des utilisateurs */
         .users-sidebar {
           width: 250px;
           overflow-y: auto;
@@ -915,16 +982,16 @@ const CHAT = () => {
           box-shadow: var(--box-shadow);
           padding: 10px;
         }
-
+        
         .sidebar-header {
           margin-bottom: 10px;
         }
-
+        
         .tabs {
           display: flex;
           margin-bottom: 10px;
         }
-
+        
         .tabs button {
           flex: 1;
           padding: 10px;
@@ -932,12 +999,12 @@ const CHAT = () => {
           background-color: var(--dark);
           border-radius: var(--border-radius);
         }
-
+        
         .tabs .active {
           background-color: var(--primary);
           color: var(--dark-background);
         }
-
+        
         .search-bar input {
           width: 100%;
           padding: 8px;
@@ -946,12 +1013,12 @@ const CHAT = () => {
           background-color: var(--dark);
           color: var(--light);
         }
-
+        
         .users-list {
           display: flex;
           flex-direction: column;
         }
-
+        
         .user-card {
           padding: 10px;
           margin-bottom: 5px;
@@ -963,43 +1030,44 @@ const CHAT = () => {
           cursor: pointer;
           transition: all 0.3s ease;
         }
-
+        
         .user-card:hover {
           background-color: var(--accent);
         }
-
+        
         .user-avatar img, .avatar-placeholder {
           width: 40px;
           height: 40px;
           border-radius: 50%;
           margin-right: 10px;
         }
-
+        
         .user-info {
           flex: 1;
         }
-
+        
         .user-name-row {
           display: flex;
           align-items: center;
         }
-
+        
         .user-name-row h3 {
           flex: 1;
         }
-
+        
         .last-seen {
           font-size: 0.9em;
           color: var(--tertiary);
         }
-
+        
+        /* Zone principale de chat */
         .chat-area {
           flex: 1;
           display: flex;
           flex-direction: column;
           background-color: var(--dark-background);
         }
-
+        
         .chat-header-user {
           display: flex;
           justify-content: space-between;
@@ -1008,19 +1076,19 @@ const CHAT = () => {
           background-color: var(--dark-background);
           box-shadow: var(--box-shadow);
         }
-
+        
         .selected-user {
           display: flex;
           align-items: center;
         }
-
+        
         .message-input-container {
           display: flex;
           align-items: center;
           padding: 10px;
           background-color: var(--dark-background);
         }
-
+        
         .message-input {
           flex: 1;
           padding: 10px;
@@ -1030,7 +1098,7 @@ const CHAT = () => {
           color: var(--light);
           box-shadow: var(--box-shadow) inset;
         }
-
+        
         .send-button {
           background-color: var(--accent);
           padding: 10px;
@@ -1041,21 +1109,21 @@ const CHAT = () => {
           justify-content: center;
           box-shadow: var(--box-shadow);
         }
-
+        
         .voice-button {
           margin-left: 10px;
         }
-
+        
         .attach-button {
           margin: 0 10px;
         }
-
+        
         .chat-actions button,
         .tabs button:not(.active) {
           background-color: var(--dark-background);
           box-shadow: inset 0 0 8px var(--primary);
         }
-
+        
         .messages-container {
           flex: 1;
           overflow-y: auto;
@@ -1064,21 +1132,21 @@ const CHAT = () => {
           color: var(--light);
           box-shadow: var(--box-shadow) inset;
         }
-
+        
         .message {
           display: flex;
           align-items: flex-start;
           margin-bottom: 10px;
         }
-
+        
         .message.received {
           justify-content: flex-start;
         }
-
+        
         .message.sent {
           justify-content: flex-end;
         }
-
+        
         .message-content {
           max-width: 60%;
           padding: 10px;
@@ -1086,7 +1154,12 @@ const CHAT = () => {
           background-color: var(--accent);
           box-shadow: var(--box-shadow);
         }
-
+        
+        .message-content .message-media img {
+          max-width: 100%;
+          border-radius: var(--border-radius);
+        }
+        
         .message-meta {
           display: flex;
           justify-content: space-between;
@@ -1102,13 +1175,13 @@ const CHAT = () => {
         .message-status {
           font-weight: bold;
         }
-
+        
         .typing-indicator {
           display: flex;
           align-items: center;
           margin: 0 auto;
         }
-
+        
         .dot {
           width: 8px;
           height: 8px;
@@ -1117,7 +1190,7 @@ const CHAT = () => {
           border-radius: 50%;
           animation: dotPulse 1.5s infinite;
         }
-
+        
         @keyframes dotPulse {
           0% {
             transform: scale(1);
