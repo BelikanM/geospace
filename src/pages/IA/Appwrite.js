@@ -1,6 +1,26 @@
 // src/pages/IA/Appwrite.js
 import { Client, Account, Databases, Storage, ID, Query } from 'appwrite';
 
+// Fonction utilitaire pour tronquer les chaînes trop longues pour Appwrite
+const truncateString = (str) => {
+  if (typeof str === 'string' && str.length > 255) {
+    return str.substring(0, 252) + '...';
+  }
+  return str;
+};
+
+// Fonction pour sérialiser un objet en JSON et tronquer si nécessaire
+const serializeAndTruncate = (obj) => {
+  if (!obj) return '';
+  try {
+    const jsonString = JSON.stringify(obj);
+    return truncateString(jsonString);
+  } catch (error) {
+    console.error('Error serializing object:', error);
+    return '';
+  }
+};
+
 // Appwrite configuration avec valeurs par défaut
 const AppwriteConfig = {
   endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
@@ -85,6 +105,12 @@ export const loginWithGoogle = () => {
 // Location data functions
 export const saveUserLocation = async (userId, location, locationInfo) => {
   try {
+    // Préparation des données en s'assurant qu'aucune chaîne ne dépasse 255 caractères
+    const neighborhood = truncateString(locationInfo.neighborhood || '');
+    
+    // Convertir l'objet weather en chaîne JSON et la tronquer si nécessaire
+    const weatherString = serializeAndTruncate(locationInfo.weather);
+    
     return await databases.createDocument(
       DATABASE_ID,
       COLLECTION_ID,
@@ -93,9 +119,9 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
         user_id: userId,
         latitude: location.lat,
         longitude: location.lng,
-        neighborhood: locationInfo.neighborhood,
+        neighborhood: neighborhood,
         timestamp: new Date().toISOString(),
-        weather: locationInfo.weather || {}
+        weather: weatherString // Maintenant c'est une chaîne tronquée
       }
     );
   } catch (error) {
@@ -118,13 +144,28 @@ export const retrySendFailedBatches = async () => {
 
 export const getUserLocations = async (userId) => {
   try {
-    return await databases.listDocuments(
+    const response = await databases.listDocuments(
       DATABASE_ID,
       COLLECTION_ID,
       [
         Query.equal('user_id', userId)
       ]
     );
+    
+    // Optionnel: reconvertir les chaînes weather en objets JSON pour faciliter l'utilisation
+    const documents = response.documents.map(doc => {
+      if (doc.weather && typeof doc.weather === 'string') {
+        try {
+          doc.weatherObject = JSON.parse(doc.weather);
+        } catch (e) {
+          // Si erreur de parsing, on garde juste la chaîne
+          doc.weatherObject = null;
+        }
+      }
+      return doc;
+    });
+    
+    return { ...response, documents };
   } catch (error) {
     console.error('Error getting locations:', error);
     throw error;

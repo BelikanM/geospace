@@ -1,4 +1,3 @@
-// src/pages/IA/MapCustomizer.js
 import React, { useState, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import { HexColorPicker } from 'react-colorful';
@@ -23,7 +22,6 @@ function MapCustomizer({ onAddMarker, onAddPolygon, onClose }) {
   const handleAddMarker = () => {
     const center = map.getCenter();
     
-    // Créer une icône personnalisée avec la couleur sélectionnée
     const icon = new L.DivIcon({
       html: `<div style="
         background-color: ${markerColor};
@@ -57,14 +55,11 @@ function MapCustomizer({ onAddMarker, onAddPolygon, onClose }) {
     setIsDrawing(true);
     polygonPointsRef.current = [];
     
-    // Nettoyer les couches temporaires existantes
     tempLayersRef.current.forEach(layer => map.removeLayer(layer));
     tempLayersRef.current = [];
     
-    // Ajouter un gestionnaire de clic à la carte
     map.on('click', handleMapClick);
     
-    // Mettre à jour le curseur pour indiquer le mode dessin
     document.getElementById('map').style.cursor = 'crosshair';
   };
 
@@ -72,7 +67,6 @@ function MapCustomizer({ onAddMarker, onAddPolygon, onClose }) {
     const { lat, lng } = e.latlng;
     polygonPointsRef.current.push([lat, lng]);
     
-    // Afficher un marqueur pour le point cliqué
     const marker = L.circleMarker([lat, lng], {
       radius: 5,
       color: polygonColor,
@@ -82,7 +76,6 @@ function MapCustomizer({ onAddMarker, onAddPolygon, onClose }) {
     
     tempLayersRef.current.push(marker);
     
-    // Si nous avons au moins 2 points, dessiner une ligne
     if (polygonPointsRef.current.length >= 2) {
       const lastIndex = polygonPointsRef.current.length - 1;
       const line = L.polyline([
@@ -102,7 +95,6 @@ function MapCustomizer({ onAddMarker, onAddPolygon, onClose }) {
       return;
     }
     
-    // Ajouter le polygone
     onAddPolygon({
       positions: polygonPointsRef.current,
       name: polygonName,
@@ -112,7 +104,6 @@ function MapCustomizer({ onAddMarker, onAddPolygon, onClose }) {
       fillOpacity: polygonFillOpacity
     });
     
-    // Nettoyer
     map.off('click', handleMapClick);
     document.getElementById('map').style.cursor = '';
     
