@@ -1145,6 +1145,16 @@
   resolved "https://registry.npmjs.org/@bcoe/v8-coverage/-/v8-coverage-0.2.3.tgz"
   integrity sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==
 
+"@changey/react-leaflet-markercluster@^4.0.0-rc1":
+  version "4.0.0-rc1"
+  resolved "https://registry.npmjs.org/@changey/react-leaflet-markercluster/-/react-leaflet-markercluster-4.0.0-rc1.tgz"
+  integrity sha512-gS1lEQiQwyeI6Y6Wuxuqqffwywm7giQw4tbcqtJP8zyT5bc3AzW2/EVJGwWORYo/PLDdDnvOrpI+lUJy2UA5MQ==
+  dependencies:
+    "@react-leaflet/core" "^2.0.0"
+    leaflet "^1.8.0"
+    leaflet.markercluster "^1.5.3"
+    react-leaflet "^4.0.0"
+
 "@csstools/normalize.css@*":
   version "12.1.1"
   resolved "https://registry.npmjs.org/@csstools/normalize.css/-/normalize.css-12.1.1.tgz"
@@ -2188,6 +2198,11 @@
   version "1.1.0"
   resolved "https://registry.npmjs.org/@protobufjs/utf8/-/utf8-1.1.0.tgz"
   integrity sha512-Vvn3zZrhQZkkBE8LSuW3em98c0FwgO4nxzv6OdSxPKJIEKY2bGbHn+mhGIPerzI4twdxaP8/0+06HBpwf345Lw==
+
+"@react-leaflet/core@^2.0.0", "@react-leaflet/core@^2.1.0":
+  version "2.1.0"
+  resolved "https://registry.npmjs.org/@react-leaflet/core/-/core-2.1.0.tgz"
+  integrity sha512-Qk7Pfu8BSarKGqILj4x7bCSZ1pjuAPZ+qmRwH5S7mDS91VSbVVsJSrW4qA+GPrro8t69gFYVMWb1Zc4yFmPiVg==
 
 "@react-leaflet/core@^3.0.0":
   version "3.0.0"
@@ -9652,6 +9667,11 @@ leaflet-contextmenu@^1.4.0:
   resolved "https://registry.npmjs.org/leaflet-contextmenu/-/leaflet-contextmenu-1.4.0.tgz"
   integrity sha512-BXASCmJ5bLkuJGDCpWmvGqhZi5AzeOY0IbQalfkgBcMAMfAOFSvD4y0gIQxF/XzEyLkjXaRiUpibVj4+Cf3tUA==
 
+leaflet-draw@^1.0.4:
+  version "1.0.4"
+  resolved "https://registry.npmjs.org/leaflet-draw/-/leaflet-draw-1.0.4.tgz"
+  integrity sha512-rsQ6saQO5ST5Aj6XRFylr5zvarWgzWnrg46zQ1MEOEIHsppdC/8hnN8qMoFvACsPvTioAuysya/TVtog15tyAQ==
+
 leaflet-easybutton@^2.4.0:
   version "2.4.0"
   resolved "https://registry.npmjs.org/leaflet-easybutton/-/leaflet-easybutton-2.4.0.tgz"
@@ -9681,7 +9701,7 @@ leaflet.markercluster@^1.5.3:
   resolved "https://registry.npmjs.org/leaflet.markercluster/-/leaflet.markercluster-1.5.3.tgz"
   integrity sha512-vPTw/Bndq7eQHjLBVlWpnGeLa3t+3zGiuM7fJwCkiMFq+nmRuG3RI3f7f4N4TDX7T4NpbAXpR2+NTRSEGfCSeA==
 
-leaflet@*, leaflet@^1.0.1, leaflet@^1.3.1, leaflet@^1.9.0, leaflet@^1.9.4:
+leaflet@*, leaflet@^1.0.1, leaflet@^1.3.1, leaflet@^1.8.0, leaflet@^1.9.0, leaflet@^1.9.4:
   version "1.9.4"
   resolved "https://registry.npmjs.org/leaflet/-/leaflet-1.9.4.tgz"
   integrity sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==
@@ -9858,7 +9878,7 @@ long@4.0.0:
   resolved "https://registry.npmjs.org/long/-/long-4.0.0.tgz"
   integrity sha512-XsP+KhQif4bjX1kbuSiySJFNAehNxgLb6hPRGJ9QsUr8ajHkuXGdrHmFUTUUXhDwVX2R5bY4JNZEwbUiMhV+MA==
 
-loose-envify@^1.0.0, loose-envify@^1.2.0, loose-envify@^1.3.1, loose-envify@^1.4.0:
+loose-envify@^1.0.0, loose-envify@^1.1.0, loose-envify@^1.2.0, loose-envify@^1.3.1, loose-envify@^1.4.0:
   version "1.4.0"
   resolved "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz"
   integrity sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==
@@ -11601,7 +11621,7 @@ prompts@^2.0.1, prompts@^2.4.2:
     kleur "^3.0.3"
     sisteransi "^1.0.5"
 
-prop-types@^15.5.10, prop-types@^15.6.1, prop-types@^15.6.2, prop-types@^15.7.2, prop-types@^15.8.1:
+prop-types@^15.5.10, prop-types@^15.5.2, prop-types@^15.6.1, prop-types@^15.6.2, prop-types@^15.7.2, prop-types@^15.8.1:
   version "15.8.1"
   resolved "https://registry.npmjs.org/prop-types/-/prop-types-15.8.1.tgz"
   integrity sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==
@@ -11815,6 +11835,14 @@ react-devtools-core@^6.1.1:
   dependencies:
     scheduler "^0.26.0"
 
+react-dom@^18.0.0:
+  version "18.3.1"
+  resolved "https://registry.npmjs.org/react-dom/-/react-dom-18.3.1.tgz"
+  integrity sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==
+  dependencies:
+    loose-envify "^1.1.0"
+    scheduler "^0.23.2"
+
 react-draggable@^4.4.6:
   version "4.4.6"
   resolved "https://registry.npmjs.org/react-draggable/-/react-draggable-4.4.6.tgz"
@@ -11863,6 +11891,14 @@ react-is@^19.0.0, react-is@^19.1.0:
   resolved "https://registry.npmjs.org/react-is/-/react-is-19.1.0.tgz"
   integrity sha512-Oe56aUPnkHyyDxxkvqtd7KkdQP5uIUfHxd5XTb3wE9d/kRnZLmKbDB0GWk919tdQ+mxxPtG6EAs6RMT6i1qtHg==
 
+react-leaflet-draw@^0.20.6:
+  version "0.20.6"
+  resolved "https://registry.npmjs.org/react-leaflet-draw/-/react-leaflet-draw-0.20.6.tgz"
+  integrity sha512-mGypDjJNrrnVpfKfGYovNBuJZXSk39ClOdUJe/5dB5Cj3f2BGQlY9txyV4UmUxZCbc96aq+FMwrGZeM4BokhHQ==
+  dependencies:
+    fast-deep-equal "^3.1.3"
+    lodash-es "^4.17.15"
+
 react-leaflet-markercluster@^5.0.0-rc.0:
   version "5.0.0-rc.0"
   resolved "https://registry.npmjs.org/react-leaflet-markercluster/-/react-leaflet-markercluster-5.0.0-rc.0.tgz"
@@ -11873,7 +11909,7 @@ react-leaflet-markercluster@^5.0.0-rc.0:
     leaflet.markercluster "^1.5.3"
     react-leaflet "^5.0.0"
 
-react-leaflet@^5.0.0:
+react-leaflet@^4.0.0, react-leaflet@^5.0.0:
   version "5.0.0"
   resolved "https://registry.npmjs.org/react-leaflet/-/react-leaflet-5.0.0.tgz"
   integrity sha512-CWbTpr5vcHw5bt9i4zSlPEVQdTVcML390TjeDG0cK59z1ylexpqC6M1PJFjV8jD7CF+ACBFsLIDs6DRMoLEofw==
@@ -12097,10 +12133,17 @@ react-webcam@^7.2.0:
   resolved "https://registry.npmjs.org/react-webcam/-/react-webcam-7.2.0.tgz"
   integrity sha512-xkrzYPqa1ag2DP+2Q/kLKBmCIfEx49bVdgCCCcZf88oF+0NPEbkwYk3/s/C7Zy0mhM8k+hpdNkBLzxg8H0aWcg==
 
-react@*, "react@^0.14.0 || ^15.0.1 || ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react@^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react@^16.0.0 || ^17.x || ^18.x || ^19.x", "react@^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react@^17.0.0 || ^18.0.0 || ^19.0.0", "react@^18 || ^19", "react@^18.0.0 || ^19.0.0", react@^19, react@^19.0.0, react@^19.1.0, "react@>= 16", "react@>= 16.3.0", "react@>= 16.8.0", react@>=15, react@>=16, react@>=16.13, react@>=16.2.0, react@>=16.3, react@>=16.6.0, react@>=16.8, react@>=16.8.0, react@>=17.0, react@>=17.0.1, react@>=18.0.0:
+react@*, "react@^0.14.0 || ^15.0.1 || ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react@^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react@^16.0.0 || ^17.x || ^18.x || ^19.x", "react@^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0", "react@^17.0.0 || ^18.0.0 || ^19.0.0", "react@^18 || ^19", react@^18.0.0, "react@^18.0.0 || ^19.0.0", react@^19, react@^19.0.0, react@^19.1.0, "react@>= 16", "react@>= 16.3.0", "react@>= 16.8.0", react@>=15, react@>=16, react@>=16.13, react@>=16.2.0, react@>=16.3, react@>=16.6.0, react@>=16.8, react@>=16.8.0, react@>=17.0, react@>=17.0.1, react@>=18.0.0:
   version "19.1.0"
   resolved "https://registry.npmjs.org/react/-/react-19.1.0.tgz"
   integrity sha512-FS+XFBNvn3GTAWq26joslQgWNoFu08F4kl0J4CgdNKADkdSGXQyTCnKteIAJy96Br6YbpEU1LSzV5dYtjMkMDg==
+
+react@^18.3.1:
+  version "18.3.1"
+  resolved "https://registry.npmjs.org/react/-/react-18.3.1.tgz"
+  integrity sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==
+  dependencies:
+    loose-envify "^1.1.0"
 
 reactcss@^1.2.0:
   version "1.2.3"
@@ -12473,6 +12516,13 @@ saxes@^5.0.1:
   integrity sha512-5LBh1Tls8c9xgGjw3QrMwETmTMVk0oFgvrFSvWx62llR2hcEInrKNZ2GZCCuuy2lvWrdl5jhbpeqc5hRYKFOcw==
   dependencies:
     xmlchars "^2.2.0"
+
+scheduler@^0.23.2:
+  version "0.23.2"
+  resolved "https://registry.npmjs.org/scheduler/-/scheduler-0.23.2.tgz"
+  integrity sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==
+  dependencies:
+    loose-envify "^1.1.0"
 
 scheduler@^0.25.0:
   version "0.25.0"
