@@ -1,17 +1,16 @@
 import { Client, Account, Databases, Storage, ID, Query } from 'appwrite';
 
-// Appwrite configuration avec valeurs par défaut
+// Appwrite configuration with default values
 const AppwriteConfig = {
   endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
   projectId: process.env.REACT_APP_APPWRITE_PROJECT_ID || '67bb24ad002378e79e38',
   databaseId: process.env.REACT_APP_APPWRITE_DATABASE_ID || '67bb32ca00157be0d0a2',
-  collectionId: process.env.REACT_APP_APPWRITE_COLLECTION_ID || '67ec0ff5002cafd109d7', // Assurez-vous que cette collection est utilisée pour les notes
+  collectionId: process.env.REACT_APP_APPWRITE_COLLECTION_ID || '67ec0ff5002cafd109d7',
   bucketId: process.env.REACT_APP_APPWRITE_BUCKET_ID || '67c698210004ee988ef1'
 };
 
 // Appwrite client configuration
 const client = new Client();
-
 client
   .setEndpoint(AppwriteConfig.endpoint)
   .setProject(AppwriteConfig.projectId);
@@ -23,30 +22,18 @@ const storage = new Storage(client);
 
 // Database constants
 const DATABASE_ID = AppwriteConfig.databaseId;
-const COLLECTION_ID = AppwriteConfig.collectionId; // Assurez-vous que cette collection est correcte pour stocker les notes
+const COLLECTION_ID = AppwriteConfig.collectionId;
 const BUCKET_ID = AppwriteConfig.bucketId;
 
 // Auth functions
 export const createUser = async (email, password, name) => {
-  try {
-    const response = await account.create(ID.unique(), email, password, name);
-    if (response) {
-      await loginUser(email, password);
-    }
-    return response;
-  } catch (error) {
-    console.error('Error creating user:', error);
-    throw error;
-  }
+  const response = await account.create(ID.unique(), email, password, name);
+  await loginUser(email, password);
+  return response;
 };
 
 export const loginUser = async (email, password) => {
-  try {
-    return await account.createEmailSession(email, password);
-  } catch (error) {
-    console.error('Error logging in:', error);
-    throw error;
-  }
+  return await account.createEmailSession(email, password);
 };
 
 export const getCurrentUser = async () => {
@@ -59,91 +46,59 @@ export const getCurrentUser = async () => {
 };
 
 export const logout = async () => {
-  try {
-    return await account.deleteSession('current');
-  } catch (error) {
-    console.error('Error logging out:', error);
-    throw error;
-  }
+  return await account.deleteSession('current');
 };
 
-// Alias logoutUser pour compatibilité
+// Alias logoutUser for compatibility
 export const logoutUser = logout;
 
 // Google OAuth login
 export const loginWithGoogle = () => {
-  try {
-    const redirectUrl = window.location.origin;
-    account.createOAuth2Session('google', redirectUrl, redirectUrl);
-  } catch (error) {
-    console.error('Error with Google login:', error);
-    throw error;
-  }
+  const redirectUrl = window.location.origin;
+  account.createOAuth2Session('google', redirectUrl, redirectUrl);
 };
 
 // Location data functions
 export const saveUserLocation = async (userId, location, locationInfo) => {
-  try {
-    return await databases.createDocument(
-      DATABASE_ID,
-      COLLECTION_ID,
-      ID.unique(),
-      {
-        user_id: userId,
-        latitude: location.lat,
-        longitude: location.lng,
-        neighborhood: locationInfo.neighborhood,
-        timestamp: new Date().toISOString(),
-        weather: locationInfo.weather || {}
-      }
-    );
-  } catch (error) {
-    console.error('Error saving location:', error);
-    throw error;
-  }
-};
-
-export const saveUserLocationBatch = async (userId, location, locationInfo) => {
-  // À implémenter si nécessaire
-};
-
-export const retrySendFailedBatches = async () => {
-  // À implémenter si nécessaire
-};
-
-export const getUserLocations = async (userId) => {
-  try {
-    return await databases.listDocuments(
-      DATABASE_ID,
-      COLLECTION_ID,
-      [
-        Query.equal('user_id', userId)
-      ]
-    );
-  } catch (error) {
-    console.error('Error getting locations:', error);
-    throw error;
-  }
+  return await databases.createDocument(
+    DATABASE_ID,
+    COLLECTION_ID,
+    ID.unique(),
+    {
+      user_id: userId,
+      latitude: location.lat,
+      longitude: location.lng,
+      neighborhood: locationInfo.neighborhood,
+      timestamp: new Date().toISOString(),
+      weather: locationInfo.weather || {}
+    }
+  );
 };
 
 // Function to save user's note
-export const saveUserNote = async (userId, noteData) => {
+export const saveUserNote = async (noteData) => {
+  return await databases.createDocument(
+    DATABASE_ID,
+    COLLECTION_ID,
+    ID.unique(),
+    {
+      user_id: noteData.userId,
+      title: noteData.title,
+      text: noteData.text,
+      latitude: noteData.latitude,
+      longitude: noteData.longitude,
+      timestamp: noteData.timestamp
+    }
+  );
+};
+
+// Function to fetch all notes from Appwrite
+export const fetchAllNotes = async () => {
   try {
-    return await databases.createDocument(
-      DATABASE_ID,
-      COLLECTION_ID, // Assurez-vous que cette collection est correcte pour stocker des notes
-      ID.unique(),
-      {
-        user_id: userId,
-        title: noteData.title,
-        text: noteData.text,
-        latitude: noteData.latitude,
-        longitude: noteData.longitude,
-        timestamp: noteData.timestamp
-      }
-    );
+    const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID);
+    return response.documents;
   } catch (error) {
-    console.error('Error saving user note:', error);
+    console.error('Error fetching all notes:', error);
     throw error;
   }
 };

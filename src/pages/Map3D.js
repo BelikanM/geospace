@@ -9,7 +9,7 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { loginWithGoogle, getCurrentUser, saveUserLocation, saveUserNote } from "./AppwriteConfig";
+import { loginWithGoogle, getCurrentUser, saveUserLocation, saveUserNote, fetchAllNotes } from "./AppwriteConfig";
 import axios from "axios";
 
 // Custom markers for different location types
@@ -40,6 +40,12 @@ const customIcons = {
   }),
   note: new L.Icon({
     iconUrl: "https://cdn.rawgit.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+  }),
+  otherUserNote: new L.Icon({
+    iconUrl: "https://cdn.rawgit.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png",
     iconSize: [25, 41],
     iconAnchor: [12, 41],
     popupAnchor: [1, -34],
@@ -90,12 +96,14 @@ function MapHospital() {
     busyAreas: []
   });
   const [userNotes, setUserNotes] = useState([]);
+  const [otherUsersNotes, setOtherUsersNotes] = useState([]);
   const [addingNote, setAddingNote] = useState(false);
   const [newNotePosition, setNewNotePosition] = useState(null);
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteText, setNewNoteText] = useState("");
   const watchPositionId = useRef(null);
   const dataUpdateInterval = useRef(null);
+  const notesRefreshInterval = useRef(null);
 
   // Fonction pour activer le GPS et mettre à jour la position de l'utilisateur
   const getUserLocation = () => {
@@ -462,6 +470,29 @@ function MapHospital() {
     }
   };
 
+  // Charger toutes les notes (utilisateur courant et autres)
+  const loadAllNotes = async () => {
+    try {
+      const allNotes = await fetchAllNotes();
+      
+      if (loggedInUser) {
+        // Séparer les notes de l'utilisateur actuel des autres notes
+        const currentUserNotes = allNotes.filter(note => note.userId === loggedInUser.$id);
+        const notes = allNotes.filter(note => note.userId !== loggedInUser.$id);
+        
+        setUserNotes(currentUserNotes);
+        setOtherUsersNotes(notes);
+      } else {
+        // Si non connecté, toutes les notes sont dans "autres utilisateurs"
+        setOtherUsersNotes(allNotes);
+        setUserNotes([]);
+      }
+    } catch (error) {
+      console.error("Erreur lors du chargement des notes:", error);
+      setError("Impossible de charger les notes. Veuillez réessayer plus tard.");
+    }
+  };
+
   // Function to add a new note
   const addNote = async () => {
     if (!newNotePosition || !newNoteTitle) {
@@ -475,30 +506,37 @@ function MapHospital() {
     }
 
     try {
+      setIsLoading(true);
+      
       const newNote = {
-        id: Date.now().toString(),
         title: newNoteTitle,
         text: newNoteText,
         latitude: newNotePosition.lat,
         longitude: newNotePosition.lng,
         timestamp: new Date().toISOString(),
-        userId: loggedInUser.$id
+        userId: loggedInUser.$id,
+        userName: loggedInUser.name || loggedInUser.email
       };
 
       // Save to Appwrite
-      await saveUserNote(loggedInUser.$id, newNote);
+      const savedNote = await saveUserNote(newNote);
 
-      // Add to local state
-      setUserNotes([...userNotes, newNote]);
+      // Add to local state with the ID returned from Appwrite
+      setUserNotes(prevNotes => [...prevNotes, {
+        ...newNote,
+        id: savedNote.$id
+      }]);
 
       // Reset form
       setNewNoteTitle("");
       setNewNoteText("");
       setNewNotePosition(null);
       setAddingNote(false);
+      setIsLoading(false);
     } catch (error) {
       console.error("Erreur lors de l'ajout de la note:", error);
       setError("Impossible d'enregistrer la note. Veuillez réessayer.");
+      setIsLoading(false);
     }
   };
 
@@ -508,6 +546,9 @@ function MapHospital() {
       await loginWithGoogle();
       const user = await getCurrentUser();
       setLoggedInUser(user);
+      
+      // Load notes after login
+      await loadAllNotes();
       
       // If user location exists, save it after login
       if (userLocation) {
@@ -547,19 +588,6 @@ function MapHospital() {
     }
   };
   
-  // Cleanup function
-  useEffect(() => {
-    return () => {
-      if (watchPositionId.current) {
-        navigator.geolocation.clearWatch(watchPositionId.current);
-      }
-      
-      if (dataUpdateInterval.current) {
-        clearInterval(dataUpdateInterval.current);
-      }
-    };
-  }, []);
-
   // Initial setup
   useEffect(() => {
     // Try to get current user first
@@ -576,24 +604,36 @@ function MapHospital() {
     
     checkCurrentUser();
     getUserLocation();
-  }, []);
-
-  // Load user's saved notes
-  useEffect(() => {
-    const loadUserNotes = async () => {
-      if (loggedInUser) {
-        try {
-          // Implement a function to fetch notes from Appwrite
-          // For now, we'll use mock data
-          const notes = []; // Replace with actual fetch from Appwrite
-          setUserNotes(notes);
-        } catch (error) {
-          console.error("Error loading user notes:", error);
-        }
+    
+    // Load all notes initially regardless of login state
+    loadAllNotes();
+    
+    // Set up interval to refresh notes every minute
+    notesRefreshInterval.current = setInterval(() => {
+      loadAllNotes();
+    }, 60000); // 60000 ms = 1 minute
+    
+    // Cleanup function
+    return () => {
+      if (watchPositionId.current) {
+        navigator.geolocation.clearWatch(watchPositionId.current);
+      }
+      
+      if (dataUpdateInterval.current) {
+        clearInterval(dataUpdateInterval.current);
+      }
+      
+      if (notesRefreshInterval.current) {
+        clearInterval(notesRefreshInterval.current);
       }
     };
-    
-    loadUserNotes();
+  }, []);
+
+  // Reload notes when user logs in
+  useEffect(() => {
+    if (loggedInUser) {
+      loadAllNotes();
+    }
   }, [loggedInUser]);
 
   // Sort locations by distance
@@ -650,7 +690,8 @@ function MapHospital() {
         </button>
         
         <div className="data-refresh-info">
-          Mise à jour des données: toutes les 5 minutes
+          <div>Mise à jour des données: toutes les 5 minutes</div>
+          <div>Mise à jour des notes: toutes les minutes</div>
         </div>
       </div>
       
@@ -755,6 +796,24 @@ function MapHospital() {
                 </Marker>
               ))}
               
+              {/* Other users' notes markers */}
+              {otherUsersNotes.map((note) => (
+                <Marker
+                  key={note.id}
+                  position={[note.latitude, note.longitude]}
+                  icon={customIcons.otherUserNote}
+                >
+                  <Popup>
+                    <div className="other-note-popup">
+                      <h3>{note.title}</h3>
+                      <p>{note.text}</p>
+                      <p className="note-author">Par: {note.userName || "Utilisateur anonyme"}</p>
+                      <p className="note-date">Ajouté le: {new Date(note.timestamp).toLocaleString()}</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+              
               {/* New note position marker */}
               {newNotePosition && (
                 <Marker
@@ -832,6 +891,16 @@ function MapHospital() {
               } km
             </div>
           </div>
+          
+          <div className="analytics-item">
+            <strong>Notes sur la carte:</strong>
+            <div className="stats-item">
+              Mes notes: {userNotes.length}
+            </div>
+            <div className="stats-item">
+              Autres utilisateurs: {otherUsersNotes.length}
+            </div>
+          </div>
         </div>
       </div>
       
@@ -862,12 +931,17 @@ function MapHospital() {
           </div>
           
           <div className="form-buttons">
-            <button onClick={addNote}>Enregistrer</button>
+            <button onClick={addNote} disabled={isLoading}>
+              {isLoading ? 'Enregistrement...' : 'Enregistrer'}
+            </button>
             <button onClick={() => {
               setNewNotePosition(null);
               setNewNoteTitle("");
               setNewNoteText("");
-            }}>Annuler</button>
+              setAddingNote(false);
+            }}>
+              Annuler
+            </button>
           </div>
         </div>
       )}
@@ -917,7 +991,7 @@ function MapHospital() {
                   <p><strong>Type:</strong> {selectedLocation.details.type}</p>
                   <p><strong>Lignes:</strong> {selectedLocation.details.lines.join(", ")}</p>
                   <p><strong>Opérateur:</strong> {selectedLocation.details.operator}</p>
-                  {selectedLocation.details.frequency !== "Non spécifié" && 
+                                   {selectedLocation.details.frequency !== "Non spécifié" && 
                     <p><strong>Fréquence:</strong> {selectedLocation.details.frequency}</p>}
                 </>
               )}
@@ -1009,7 +1083,6 @@ function MapHospital() {
           background-color: #4285f4;
           color: white;
           border: none;
-
           border-radius: 4px;
           cursor: pointer;
           font-weight: 500;
@@ -1112,6 +1185,11 @@ function MapHospital() {
           margin: 0 0 10px 0;
           font-size: 14px;
           color: #6a1b9a;
+        }
+
+        .note-author {
+          font-size: 12px;
+          color: #8e8e8e;
         }
 
         .note-date {
