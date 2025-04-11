@@ -5,7 +5,7 @@ const AppwriteConfig = {
   endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
   projectId: process.env.REACT_APP_APPWRITE_PROJECT_ID || '67bb24ad002378e79e38',
   databaseId: process.env.REACT_APP_APPWRITE_DATABASE_ID || '67bb32ca00157be0d0a2',
-  collectionId: process.env.REACT_APP_APPWRITE_COLLECTION_ID || '67ec0ff5002cafd109d7',
+  collectionId: process.env.REACT_APP_APPWRITE_COLLECTION_ID || '67ec0ff5002cafd109d7', // Assurez-vous que cette collection est utilisée pour les notes
   bucketId: process.env.REACT_APP_APPWRITE_BUCKET_ID || '67c698210004ee988ef1'
 };
 
@@ -23,7 +23,7 @@ const storage = new Storage(client);
 
 // Database constants
 const DATABASE_ID = AppwriteConfig.databaseId;
-const COLLECTION_ID = AppwriteConfig.collectionId;
+const COLLECTION_ID = AppwriteConfig.collectionId; // Assurez-vous que cette collection est correcte pour stocker les notes
 const BUCKET_ID = AppwriteConfig.bucketId;
 
 // Auth functions
@@ -126,6 +126,28 @@ export const getUserLocations = async (userId) => {
   }
 };
 
+// Function to save user's note
+export const saveUserNote = async (userId, noteData) => {
+  try {
+    return await databases.createDocument(
+      DATABASE_ID,
+      COLLECTION_ID, // Assurez-vous que cette collection est correcte pour stocker des notes
+      ID.unique(),
+      {
+        user_id: userId,
+        title: noteData.title,
+        text: noteData.text,
+        latitude: noteData.latitude,
+        longitude: noteData.longitude,
+        timestamp: noteData.timestamp
+      }
+    );
+  } catch (error) {
+    console.error('Error saving user note:', error);
+    throw error;
+  }
+};
+
 export {
   client,
   account,
@@ -135,5 +157,6 @@ export {
   COLLECTION_ID,
   BUCKET_ID,
   ID,
-  Query
+  Query,
 };
+

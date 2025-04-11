@@ -1,18 +1,17 @@
-import { Client, Account, Databases, Storage, ID } from 'appwrite';
+import { Client, Account, Databases, Storage, ID, Query } from 'appwrite';
 
 // Appwrite configuration avec valeurs par défaut
 const AppwriteConfig = {
   endpoint: process.env.REACT_APP_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1',
   projectId: process.env.REACT_APP_APPWRITE_PROJECT_ID || '67bb24ad002378e79e38',
   databaseId: process.env.REACT_APP_APPWRITE_DATABASE_ID || '67bb32ca00157be0d0a2',
-  collectionId: process.env.REACT_APP_APPWRITE_COLLECTION_ID || '67ec0ff5002cafd109d7',
+  collectionId: process.env.REACT_APP_APPWRITE_COLLECTION_ID || '67ec0ff5002cafd109d7', // Assurez-vous que cette collection est utilisée pour les notes
   bucketId: process.env.REACT_APP_APPWRITE_BUCKET_ID || '67c698210004ee988ef1'
 };
 
 // Appwrite client configuration
 const client = new Client();
 
-// Vérification des valeurs avant utilisation
 client
   .setEndpoint(AppwriteConfig.endpoint)
   .setProject(AppwriteConfig.projectId);
@@ -24,7 +23,7 @@ const storage = new Storage(client);
 
 // Database constants
 const DATABASE_ID = AppwriteConfig.databaseId;
-const COLLECTION_ID = AppwriteConfig.collectionId;
+const COLLECTION_ID = AppwriteConfig.collectionId; // Assurez-vous que cette collection est correcte pour stocker les notes
 const BUCKET_ID = AppwriteConfig.bucketId;
 
 // Auth functions
@@ -59,7 +58,7 @@ export const getCurrentUser = async () => {
   }
 };
 
-export const logoutUser = async () => {
+export const logout = async () => {
   try {
     return await account.deleteSession('current');
   } catch (error) {
@@ -68,10 +67,13 @@ export const logoutUser = async () => {
   }
 };
 
+// Alias logoutUser pour compatibilité
+export const logoutUser = logout;
+
 // Google OAuth login
 export const loginWithGoogle = () => {
   try {
-    const redirectUrl = window.location.origin; // Current URL as redirect
+    const redirectUrl = window.location.origin;
     account.createOAuth2Session('google', redirectUrl, redirectUrl);
   } catch (error) {
     console.error('Error with Google login:', error);
@@ -101,13 +103,21 @@ export const saveUserLocation = async (userId, location, locationInfo) => {
   }
 };
 
+export const saveUserLocationBatch = async (userId, location, locationInfo) => {
+  // À implémenter si nécessaire
+};
+
+export const retrySendFailedBatches = async () => {
+  // À implémenter si nécessaire
+};
+
 export const getUserLocations = async (userId) => {
   try {
     return await databases.listDocuments(
       DATABASE_ID,
       COLLECTION_ID,
       [
-        databases.queries.equal('user_id', userId)
+        Query.equal('user_id', userId)
       ]
     );
   } catch (error) {
@@ -116,6 +126,38 @@ export const getUserLocations = async (userId) => {
   }
 };
 
-export { client, account, databases, storage, DATABASE_ID, COLLECTION_ID, BUCKET_ID };
+// Function to save user's note
+export const saveUserNote = async (userId, noteData) => {
+  try {
+    return await databases.createDocument(
+      DATABASE_ID,
+      COLLECTION_ID, // Assurez-vous que cette collection est correcte pour stocker des notes
+      ID.unique(),
+      {
+        user_id: noteData.userId,
+        title: noteData.title,
+        text: noteData.text,
+        latitude: noteData.latitude,
+        longitude: noteData.longitude,
+        timestamp: noteData.timestamp
+      }
+    );
+  } catch (error) {
+    console.error('Error saving user note:', error);
+    throw error;
+  }
+};
 
+export {
+  client,
+  account,
+  databases,
+  storage,
+  DATABASE_ID,
+  COLLECTION_ID,
+  BUCKET_ID,
+  ID,
+  Query,
+  saveUserNote  // N'oubliez pas de l'exporter!
+};
 
