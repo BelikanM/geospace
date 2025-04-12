@@ -1,318 +1,525 @@
-import React, { useState, useRef, useEffect } from 'react';
-import './Robot.css';
+import React, { useEffect, useState, useRef } from 'react';
 
-const Robot = () => {
-  // États pour la caméra et l'analyse
-  const [stream, setStream] = useState(null);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [error, setError] = useState(null);
+const RobotCamera = () => {
+  // États
+  const [currentCamera, setCurrentCamera] = useState('back'); // 'back' ou 'front'
+  const [status, setStatus] = useState({ message: 'Initialisation...', type: 'info' });
   
-  // États pour les données des capteurs
-  const [gpsData, setGpsData] = useState({ latitude: null, longitude: null });
-  const [accelerometerData, setAccelerometerData] = useState({ x: 0, y: 0, z: 0 });
-  const [gyroscopeData, setGyroscopeData] = useState({ alpha: 0, beta: 0, gamma: 0 });
-  
-  // État pour les résultats de l'analyse IA
-  const [aiAnalysis, setAiAnalysis] = useState({
-    objects: [],
-    intention: null,
-    trajectory: null,
-    height: null
-  });
-  
-  // Références
+  // Refs
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamIntervalRef = useRef(null);
+  const analyzingRef = useRef(false);
   
-  // Démarrer le flux vidéo
-  const startStream = async () => {
+  // Configuration
+  const API_URL = 'http://localhost:5007';
+  
+  // Position GPS simulée ou réelle
+  const [gpsPosition, setGpsPosition] = useState({
+    lastLat: 48.8566,  // Paris par défaut
+    lastLng: 2.3522
+  });
+  
+  // Résultats
+  const [detectionResults, setDetectionResults] = useState({ objects: [], analysis: {} });
+  const [sensorData, setSensorData] = useState({});
+
+  useEffect(() => {
+    // Initialiser la caméra au chargement
+    initCamera();
+    
+    // Nettoyer à la fermeture 
+    return () => {
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+      }
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  // Initialiser la caméra
+  const initCamera = async () => {
     try {
       const constraints = {
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+        video: { 
+          facingMode: currentCamera === 'front' ? 'user' : 'environment',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
         }
       };
       
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      setStream(mediaStream);
-      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+        videoRef.current.srcObject = stream;
       }
       
-      setIsStreaming(true);
-      setError(null);
-      
-      // Commencer à collecter les données des capteurs
-      startSensorCollection();
-    } catch (err) {
-      setError(`Erreur d'accès à la caméra: ${err.message}`);
-      console.error('Erreur d\'accès à la caméra:', err);
-    }
-  };
-  
-  // Arrêter le flux vidéo
-  const stopStream = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-      setIsStreaming(false);
-      
-      // Arrêter la collecte des données des capteurs
-      stopSensorCollection();
-    }
-  };
-  
-  // Collecter les données des capteurs
-  const startSensorCollection = () => {
-    // GPS
-    if (navigator.geolocation) {
-      navigator.geolocation.watchPosition(
-        (position) => {
-          setGpsData({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude
-          });
-        },
-        (err) => console.error('Erreur GPS:', err),
-        { enableHighAccuracy: true }
-      );
-    }
-    
-    // Accéléromètre
-    if (window.DeviceMotionEvent) {
-      window.addEventListener('devicemotion', handleAccelerometer);
-    }
-    
-    // Gyroscope
-    if (window.DeviceOrientationEvent) {
-      window.addEventListener('deviceorientation', handleGyroscope);
-    }
-  };
-  
-  // Arrêter la collecte des données des capteurs
-  const stopSensorCollection = () => {
-    if (window.DeviceMotionEvent) {
-      window.removeEventListener('devicemotion', handleAccelerometer);
-    }
-    
-    if (window.DeviceOrientationEvent) {
-      window.removeEventListener('deviceorientation', handleGyroscope);
-    }
-  };
-  
-  // Gestionnaires d'événements pour les capteurs
-  const handleAccelerometer = (event) => {
-    setAccelerometerData({
-      x: event.accelerationIncludingGravity?.x?.toFixed(2) || 0,
-      y: event.accelerationIncludingGravity?.y?.toFixed(2) || 0,
-      z: event.accelerationIncludingGravity?.z?.toFixed(2) || 0
-    });
-  };
-  
-  const handleGyroscope = (event) => {
-    setGyroscopeData({
-      alpha: event.alpha?.toFixed(2) || 0, // Z-axis rotation [0, 360)
-      beta: event.beta?.toFixed(2) || 0,   // X-axis rotation [-180, 180)
-      gamma: event.gamma?.toFixed(2) || 0  // Y-axis rotation [-90, 90)
-    });
-  };
-  
-  // Capturer et analyser une image
-  const captureAndAnalyze = async () => {
-    if (!isStreaming || isAnalyzing) return;
-    
-    setIsAnalyzing(true);
-    
-    try {
-      // Capturer l'image depuis la vidéo
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext('2d');
-      
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Convertir l'image en blob
-      const blob = await new Promise(resolve => {
-        canvas.toBlob(resolve, 'image/jpeg', 0.8);
+      // Attendre que la vidéo soit prête
+      await new Promise(resolve => {
+        if (videoRef.current) {
+          videoRef.current.onloadedmetadata = () => {
+            resolve();
+          };
+        }
       });
       
-      // Préparer les données à envoyer
+      // Configurer le canvas avec les dimensions de la vidéo
+      if (canvasRef.current && videoRef.current) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+      }
+      
+      // Démarrer l'analyse en continu
+      startContinuousAnalysis();
+      
+      updateStatus('Caméra active', 'success');
+    } catch (err) {
+      updateStatus(`Erreur de caméra: ${err.message}`, 'error');
+      console.error('Erreur lors de l\'accès à la caméra:', err);
+    }
+  };
+
+  // Fonction pour basculer entre les caméras avant/arrière
+  const switchCamera = async () => {
+    // Arrêter la caméra actuelle
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+    }
+    
+    // Basculer la caméra
+    const newCamera = currentCamera === 'back' ? 'front' : 'back';
+    setCurrentCamera(newCamera);
+    
+    // Informer le backend du changement
+    try {
+      await fetch(`${API_URL}/switch/camera`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ camera: newCamera })
+      });
+    } catch (err) {
+      console.warn('Erreur lors du changement de caméra sur le backend:', err);
+    }
+    
+    // Redémarrer la caméra
+    await initCamera();
+  };
+
+  // Capturer une image depuis la vidéo
+  const captureFrame = () => {
+    if (!canvasRef.current || !videoRef.current) return null;
+    
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+    
+    return new Promise(resolve => {
+      canvasRef.current.toBlob(blob => {
+        resolve(blob);
+      }, 'image/jpeg', 0.85);
+    });
+  };
+
+  // Collecter les données des capteurs
+  const collectSensorData = async () => {
+    const accelerometer = getAccelerometerData();
+    const gyroscope = getGyroscopeData();
+    const gps = await getGPSData();
+    
+    const sensorData = { accelerometer, gyroscope, gps };
+    setSensorData(sensorData);
+    return sensorData;
+  };
+
+  // Récupérer les données de l'accéléromètre
+  const getAccelerometerData = () => {
+    // Simuler des données ou utiliser des capteurs réels si disponibles
+    return {
+      x: Math.random() * 2 - 1,  // -1 à 1
+      y: Math.random() * 2 - 1,
+      z: Math.random() * 2 - 1,
+      timestamp: Date.now()
+    };
+  };
+
+  // Récupérer les données du gyroscope
+  const getGyroscopeData = () => {
+    // Simuler des données ou utiliser des capteurs réels si disponibles
+    return {
+      alpha: Math.random() * 360,  // 0 à 360 degrés
+      beta: Math.random() * 180 - 90,  // -90 à 90 degrés
+      gamma: Math.random() * 180 - 90,  // -90 à 90 degrés
+      timestamp: Date.now()
+    };
+  };
+
+  // Récupérer les données GPS
+  const getGPSData = () => {
+    return new Promise((resolve) => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const newPosition = {
+              lastLat: position.coords.latitude,
+              lastLng: position.coords.longitude
+            };
+            setGpsPosition(newPosition);
+            
+            resolve({
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              timestamp: Date.now()
+            });
+          },
+          (error) => {
+            console.warn('Erreur GPS:', error.message);
+            // Simuler un petit déplacement pour les tests
+            const newLat = gpsPosition.lastLat + (Math.random() - 0.5) * 0.001;
+            const newLng = gpsPosition.lastLng + (Math.random() - 0.5) * 0.001;
+            
+            setGpsPosition({
+              lastLat: newLat,
+              lastLng: newLng
+            });
+            
+            resolve({
+              latitude: newLat,
+              longitude: newLng,
+              accuracy: 50,
+              timestamp: Date.now()
+            });
+          },
+          { maximumAge: 5000, timeout: 3000 }
+        );
+      } else {
+        // Simuler des données GPS si non disponible
+        const newLat = gpsPosition.lastLat + (Math.random() - 0.5) * 0.001;
+        const newLng = gpsPosition.lastLng + (Math.random() - 0.5) * 0.001;
+        
+        setGpsPosition({
+          lastLat: newLat,
+          lastLng: newLng
+        });
+        
+        resolve({
+          latitude: newLat,
+          longitude: newLng,
+          accuracy: 100,
+          timestamp: Date.now()
+        });
+      }
+    });
+  };
+
+  // Analyser une image capturée
+  const analyzeFrame = async () => {
+    if (analyzingRef.current) return; // Éviter les analyses simultanées
+    analyzingRef.current = true;
+    
+    try {
+      updateStatus('Analyse en cours...', 'processing');
+      
+      // Capturer l'image
+      const imageBlob = await captureFrame();
+      if (!imageBlob) {
+        throw new Error('Impossible de capturer l\'image');
+      }
+      
+      // Collecter les données des capteurs
+      const sensors = await collectSensorData();
+      
+      // Préparer les données pour l'envoi
       const formData = new FormData();
-      formData.append('image', blob, 'capture.jpg');
+      formData.append('image', imageBlob, 'capture.jpg');
+      formData.append('camera', currentCamera);
       
       // Ajouter les données des capteurs
-      formData.append('gps', JSON.stringify(gpsData));
-      formData.append('accelerometer', JSON.stringify(accelerometerData));
-      formData.append('gyroscope', JSON.stringify(gyroscopeData));
+      for (const [sensorType, data] of Object.entries(sensors)) {
+        formData.append(sensorType, JSON.stringify(data));
+      }
       
       // Envoyer au serveur pour analyse
-      const response = await fetch('http://localhost:5007/process/image', {
+      const response = await fetch(`${API_URL}/process/image`, {
         method: 'POST',
-        body: formData,
+        body: formData
       });
       
       if (!response.ok) {
         throw new Error(`Erreur serveur: ${response.status}`);
       }
       
-      const data = await response.json();
-      console.log("Analyse IA:", data);
+      const result = await response.json();
       
-      // Mettre à jour l'état avec les résultats de l'analyse
-      setAiAnalysis({
-        objects: data.objects || [],
-        intention: data.intention || "Non détecté",
-        trajectory: data.trajectory || "Non détecté",
-        height: data.height || null
-      });
+      // Afficher les résultats
+      setDetectionResults(result);
+      drawDetectionBoxes(result.objects);
+      updateStatus('Analyse terminée', 'success');
       
-      setIsAnalyzing(false);
-      setError(null);
-      
-    } catch (err) {
-      setError(`Erreur d'analyse: ${err.message}`);
-      console.error('Erreur d\'analyse:', err);
-      setIsAnalyzing(false);
+    } catch (error) {
+      console.error('Erreur lors de l\'analyse:', error);
+      updateStatus(`Erreur: ${error.message}`, 'error');
+    } finally {
+      analyzingRef.current = false;
     }
   };
-  
-  // Nettoyer les ressources lors du démontage du composant
-  useEffect(() => {
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+
+  // Démarrer l'analyse en continu (toutes les 500ms)
+  const startContinuousAnalysis = () => {
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+    }
+    
+    // Analyser à un intervalle régulier
+    streamIntervalRef.current = setInterval(analyzeFrame, 500);
+  };
+
+  // Dessiner les cadres de détection sur l'image
+  const drawDetectionBoxes = (objects) => {
+    if (!objects || !Array.isArray(objects) || !canvasRef.current || !videoRef.current) return;
+    
+    const ctx = canvasRef.current.getContext('2d');
+    // Effacer le canvas
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    // Redessiner l'image de la vidéo
+    ctx.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+    
+    // Dessiner les cadres pour chaque objet détecté
+    objects.forEach(obj => {
+      if (obj.box) {
+        const { xmin, ymin, xmax, ymax } = obj.box;
+        
+        // Dessiner le rectangle
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(xmin, ymin, xmax - xmin, ymax - ymin);
+        
+        // Afficher le label
+        ctx.fillStyle = '#00FF00';
+        ctx.font = '16px Arial';
+        ctx.fillText(`${obj.label} ${(obj.confidence * 100).toFixed(0)}%`, xmin, ymin - 5);
       }
-      stopSensorCollection();
-    };
-  }, [stream]);
-  
+    });
+  };
+
+  // Mettre à jour l'indicateur de statut
+  const updateStatus = (message, type = 'info') => {
+    setStatus({ message, type });
+  };
+
   return (
-    <div className="robot-container">
-      <h2>Système de Vision Robotique</h2>
-      
-      <div className="video-container">
-        <video 
-          ref={videoRef}
-          className={`video-feed ${isAnalyzing ? 'analyzing' : ''}`}
-          autoPlay
-          playsInline
-          muted
-        />
-        {isAnalyzing && (
-          <div className="analyzing-overlay">
-            Analyse en cours...
-          </div>
-        )}
-        <canvas ref={canvasRef} style={{ display: 'none' }} />
+    <div className="robot-camera-container">
+      <div className="camera-section">
+        <div className="video-container">
+          <video 
+            ref={videoRef} 
+            id="camera-feed" 
+            autoPlay 
+            playsInline
+            muted
+          />
+          <canvas 
+            ref={canvasRef} 
+            id="capture-canvas" 
+          />
+        </div>
+        
+        <div className={`status-indicator ${status.type}`} id="status-indicator">
+          {status.message}
+        </div>
+        
+        <button 
+          className="switch-camera-btn" 
+          id="switch-camera"
+          onClick={switchCamera}
+        >
+          Changer de caméra
+        </button>
       </div>
       
-      <div className="control-panel">
-        <div className="button-group">
-          {!isStreaming ? (
-            <button 
-              className="control-button primary" 
-              onClick={startStream}
-              disabled={isAnalyzing}
-            >
-              Démarrer la caméra
-            </button>
+      <div className="results-section">
+        <div className="detection-results" id="detection-results">
+          <h3>Objets détectés:</h3>
+          {detectionResults.objects && detectionResults.objects.length > 0 ? (
+            <ul>
+              {detectionResults.objects.map((obj, index) => (
+                <li key={index}>
+                  {obj.label} (confiance: {(obj.confidence * 100).toFixed(1)}%)
+                </li>
+              ))}
+            </ul>
           ) : (
-            <button 
-              className="control-button active" 
-              onClick={stopStream}
-              disabled={isAnalyzing}
-            >
-              Arrêter la caméra
-            </button>
+            <p>Aucun objet détecté</p>
           )}
           
-          <button 
-            className="control-button primary" 
-            onClick={captureAndAnalyze}
-            disabled={!isStreaming || isAnalyzing}
-          >
-            Analyser la scène
-          </button>
+          <h3>Analyse:</h3>
+          <p>Intention: {detectionResults.intention || 'Inconnue'}</p>
+          <p>Trajectoire: {detectionResults.trajectory || 'Inconnue'}</p>
+          {detectionResults.height && (
+            <p>Hauteur estimée: {detectionResults.height} cm</p>
+          )}
+          {detectionResults.speed !== undefined && (
+            <p>Vitesse: {detectionResults.speed.toFixed(1)} km/h</p>
+          )}
         </div>
         
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
-        
-        <div className="sensor-data">
-          <div className="data-section">
-            <h3>Données des capteurs</h3>
-            <div className="sensor-grid">
-              <div>
-                <h4>GPS</h4>
-                <p>Latitude: {gpsData.latitude || 'Non disponible'}</p>
-                <p>Longitude: {gpsData.longitude || 'Non disponible'}</p>
-              </div>
-              
-              <div>
-                <h4>Accéléromètre</h4>
-                <p>X: {accelerometerData.x} m/s²</p>
-                <p>Y: {accelerometerData.y} m/s²</p>
-                <p>Z: {accelerometerData.z} m/s²</p>
-              </div>
-              
-              <div>
-                <h4>Gyroscope</h4>
-                <p>Alpha: {gyroscopeData.alpha}°</p>
-                <p>Beta: {gyroscopeData.beta}°</p>
-                <p>Gamma: {gyroscopeData.gamma}°</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="ai-analysis">
-          <h3>Analyse IA</h3>
-          
-          <div className="analysis-grid">
-            <div className="analysis-section">
-              <h4>Objets détectés</h4>
-              {aiAnalysis.objects.length > 0 ? (
-                <ul>
-                  {aiAnalysis.objects.map((obj, index) => (
-                    <li key={index}>
-                      {obj.label} ({(obj.confidence * 100).toFixed(1)}%)
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>Aucun objet détecté</p>
+        <div className="sensor-data" id="sensor-data">
+          <h3>Capteurs:</h3>
+          {detectionResults.sensor_data && (
+            <ul>
+              {detectionResults.sensor_data.gps && (
+                <li>
+                  GPS: {detectionResults.sensor_data.gps.latitude.toFixed(6)}, 
+                  {detectionResults.sensor_data.gps.longitude.toFixed(6)}
+                </li>
               )}
-            </div>
-            
-            <div className="analysis-section">
-              <h4>Intention</h4>
-              <p>{aiAnalysis.intention || 'Non détectée'}</p>
-            </div>
-            
-            <div className="analysis-section">
-              <h4>Trajectoire</h4>
-              <p>{aiAnalysis.trajectory || 'Non détectée'}</p>
-            </div>
-            
-            <div className="analysis-section">
-              <h4>Hauteur estimée</h4>
-              <p>{aiAnalysis.height ? `${aiAnalysis.height} cm` : 'Non détectée'}</p>
-            </div>
-          </div>
+              
+              {detectionResults.sensor_data.accelerometer && (
+                <li>
+                  Accéléromètre: X={detectionResults.sensor_data.accelerometer.x.toFixed(2)}, 
+                  Y={detectionResults.sensor_data.accelerometer.y.toFixed(2)}, 
+                  Z={detectionResults.sensor_data.accelerometer.z.toFixed(2)}
+                </li>
+              )}
+              
+              {detectionResults.sensor_data.gyroscope && (
+                <li>
+                  Gyroscope: α={detectionResults.sensor_data.gyroscope.alpha.toFixed(1)}°, 
+                  β={detectionResults.sensor_data.gyroscope.beta.toFixed(1)}°, 
+                  γ={detectionResults.sensor_data.gyroscope.gamma.toFixed(1)}°
+                </li>
+              )}
+            </ul>
+          )}
         </div>
       </div>
+      
+      <style jsx>{`
+        .robot-camera-container {
+          display: flex;
+          flex-direction: column;
+          max-width: 1000px;
+          margin: 0 auto;
+          padding: 20px;
+          font-family: 'Arial', sans-serif;
+        }
+        
+        .camera-section {
+          margin-bottom: 20px;
+        }
+        
+        .video-container {
+          position: relative;
+          width: 100%;
+          height: 0;
+          padding-bottom: 75%; /* 4:3 aspect ratio */
+          border: 2px solid #444;
+          border-radius: 8px;
+          overflow: hidden;
+          background-color: #000;
+        }
+        
+        #camera-feed, #capture-canvas {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        #capture-canvas {
+          z-index: 10;
+          pointer-events: none;
+        }
+        
+        .status-indicator {
+          padding: 10px;
+          margin: 10px 0;
+          border-radius: 5px;
+          font-weight: bold;
+          text-align: center;
+        }
+        
+        .info {
+          background-color: #e0f7fa;
+          color: #006064;
+        }
+        
+        .success {
+          background-color: #e8f5e9;
+          color: #1b5e20;
+        }
+        
+        .error {
+          background-color: #ffebee;
+          color: #b71c1c;
+        }
+        
+        .processing {
+          background-color: #fffde7;
+          color: #f57f17;
+        }
+        
+        .switch-camera-btn {
+          width: 100%;
+          padding: 12px;
+          background-color: #2196f3;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: background-color 0.3s;
+        }
+        
+        .switch-camera-btn:hover {
+          background-color: #0d8aee;
+        }
+        
+        .results-section {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+        
+        @media (min-width: 768px) {
+          .results-section {
+            flex-direction: row;
+          }
+          
+          .detection-results, .sensor-data {
+            width: 50%;
+          }
+        }
+        
+        .detection-results, .sensor-data {
+          padding: 15px;
+          border-radius: 8px;
+          background-color: #f5f5f5;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        h3 {
+          margin-top: 0;
+          color: #333;
+          border-bottom: 1px solid #ddd;
+          padding-bottom: 8px;
+        }
+        
+        ul {
+          padding-left: 20px;
+        }
+        
+        li {
+          margin-bottom: 5px;
+        }
+      `}</style>
     </div>
   );
 };
 
-export default Robot;
+export default RobotCamera;
 
