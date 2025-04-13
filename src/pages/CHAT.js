@@ -1,298 +1,460 @@
 import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
-import './Person.css';
+import {
+  Box,
+  Button,
+  Container,
+  Typography,
+  Paper,
+  Grid,
+  Card,
+  CardContent,
+  CircularProgress,
+  Divider,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  IconButton,
+  Tooltip
+} from '@mui/material';
+import {
+  FaUser,
+  FaSmile,
+  FaWalking,
+  FaAccessibleIcon,
+  FaHandPaper,
+  FaTachometerAlt,
+  FaSync,
+  FaCamera,
+  FaCameraRetro,
+  FaExclamationTriangle,
+  FaArrowRight,
+  FaArrowUp,
+  FaArrowDown,
+  FaArrowLeft,
+} from 'react-icons/fa';
 
-const Person = () => {
-    const videoRef = useRef(null);
-    const canvasRef = useRef(null);
-    const [analyzing, setAnalyzing] = useState(false);
-    const [results, setResults] = useState(null);
-    const [error, setError] = useState(null);
-    const [cameraActive, setCameraActive] = useState(false);
-    const [availableCameras, setAvailableCameras] = useState([]);
-    const [selectedCamera, setSelectedCamera] = useState('');
-    const analyzeIntervalRef = useRef(null);
-
-    // Fonction pour obtenir la liste des caméras disponibles
-    const getCameras = async () => {
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const cameras = devices.filter(device => device.kind === 'videoinput');
-            setAvailableCameras(cameras);
-            
-            // Sélectionner la caméra arrière par défaut si disponible
-            const rearCamera = cameras.find(camera => 
-                camera.label.toLowerCase().includes('back') || 
-                camera.label.toLowerCase().includes('arrière') ||
-                camera.label.toLowerCase().includes('rear')
-            );
-            
-            if (rearCamera) {
-                setSelectedCamera(rearCamera.deviceId);
-            } else if (cameras.length > 0) {
-                setSelectedCamera(cameras[0].deviceId);
-            }
-        } catch (err) {
-            setError("Impossible d'accéder aux caméras: " + err.message);
-        }
+const Open = () => {
+  const [stream, setStream] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResults, setAnalysisResults] = useState(null);
+  const [error, setError] = useState(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  
+  const videoRef = useRef();
+  const canvasRef = useRef();
+  
+  // Activer la caméra
+  const startCamera = async () => {
+    try {
+      setError(null);
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 640, height: 480 } 
+      });
+      videoRef.current.srcObject = mediaStream;
+      setStream(mediaStream);
+      setCameraActive(true);
+    } catch (err) {
+      console.error("Erreur d'accès à la caméra:", err);
+      setError("Impossible d'accéder à la caméra. Veuillez vérifier les permissions.");
+    }
+  };
+  
+  // Arrêter la caméra
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+      setCameraActive(false);
+    }
+  };
+  
+  // Capturer l'image
+  const captureImage = () => {
+    if (videoRef.current && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      const imageDataURL = canvas.toDataURL('image/jpeg');
+      setCapturedImage(imageDataURL);
+    }
+  };
+  
+  // Analyser l'image capturée
+  const analyzeImage = async () => {
+    if (!capturedImage) {
+      return;
+    }
+    
+    try {
+      setAnalyzing(true);
+      setError(null);
+      
+      const response = await fetch('http://localhost:5007/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image: capturedImage })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Erreur HTTP: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setAnalysisResults(data);
+    } catch (err) {
+      console.error("Erreur lors de l'analyse:", err);
+      setError(`Erreur lors de l'analyse: ${err.message}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+  
+  // Nettoyer lors de la déconnexion
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
     };
+  }, [stream]);
+  
+  // Formatage de l'heure pour l'horodatage
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return "Inconnue";
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString();
+  };
+  
+  // Obtenir l'icône correspondant à la direction du mouvement
+  const getDirectionIcon = (direction) => {
+    switch (direction) {
+      case 'droite': return <FaArrowRight />;
+      case 'gauche': return <FaArrowLeft />;
+      case 'haut': return <FaArrowUp />;
+      case 'bas': return <FaArrowDown />;
+      default: return null;
+    }
+  };
+  
+  // Réinitialiser l'analyse
+  const resetAnalysis = () => {
+    setCapturedImage(null);
+    setAnalysisResults(null);
+    setError(null);
+  };
 
-    // Charger la liste des caméras au montage du composant
-    useEffect(() => {
-        getCameras();
-    }, []);
-
-    // Activer/désactiver la caméra
-    const toggleCamera = async () => {
-        if (cameraActive) {
-            // Arrêter la caméra
-            if (videoRef.current && videoRef.current.srcObject) {
-                const tracks = videoRef.current.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
-                videoRef.current.srcObject = null;
-            }
-            setCameraActive(false);
+  return (
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Typography variant="h4" gutterBottom component="h1" align="center">
+        Analyse d'Image en Temps Réel
+      </Typography>
+      
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={6}>
+          <Paper elevation={3} sx={{ p: 2, mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Capture Vidéo
+            </Typography>
             
-            // Arrêter l'analyse automatique
-            if (analyzeIntervalRef.current) {
-                clearInterval(analyzeIntervalRef.current);
-                analyzeIntervalRef.current = null;
-            }
-        } else {
-            try {
-                // Démarrer la caméra
-                const constraints = {
-                    video: {
-                        deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                };
-                
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
-                    setCameraActive(true);
-                    
-                    // Démarrer l'analyse automatique toutes les 2 secondes
-                    analyzeIntervalRef.current = setInterval(() => {
-                        captureAndAnalyze();
-                    }, 2000);
-                }
-            } catch (err) {
-                setError("Erreur d'accès à la caméra: " + err.message);
-            }
-        }
-    };
-
-    // Changer de caméra
-    const handleCameraChange = (e) => {
-        const newCameraId = e.target.value;
-        setSelectedCamera(newCameraId);
-        
-        // Si la caméra est déjà active, la redémarrer avec la nouvelle sélection
-        if (cameraActive) {
-            toggleCamera().then(() => toggleCamera());
-        }
-    };
-
-    // Capturer une image et l'envoyer pour analyse
-    const captureAndAnalyze = async () => {
-        if (!videoRef.current || !canvasRef.current || !cameraActive) return;
-        
-        try {
-            setAnalyzing(true);
+            <Box sx={{ position: 'relative', width: '100%', mb: 2 }}>
+              {/* Vidéo en direct */}
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                style={{ 
+                  width: '100%', 
+                  borderRadius: '8px',
+                  display: cameraActive ? 'block' : 'none'
+                }} 
+              />
+              
+              {/* Afficher l'image capturée si disponible */}
+              {capturedImage && (
+                <Box 
+                  component="img" 
+                  src={capturedImage} 
+                  sx={{ 
+                    width: '100%', 
+                    borderRadius: '8px',
+                    display: cameraActive ? 'none' : 'block'
+                  }} 
+                />
+              )}
+              
+              {/* Si l'API a renvoyé une image annotée */}
+              {analysisResults?.annotated_image && (
+                <Box 
+                  component="img" 
+                  src={analysisResults.annotated_image} 
+                  sx={{ 
+                    width: '100%', 
+                    borderRadius: '8px',
+                    mt: 2
+                  }}
+                  alt="Image annotée avec détections"
+                />
+              )}
+              
+              {/* Canvas caché pour la capture */}
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
+              
+              {/* Message d'erreur */}
+              {error && (
+                <Box 
+                  sx={{ 
+                    p: 2, 
+                    bgcolor: 'error.light', 
+                    color: 'error.contrastText',
+                    borderRadius: '8px',
+                    mt: 2
+                  }}
+                >
+                  <Typography variant="body2">
+                    <FaExclamationTriangle style={{ marginRight: '8px', verticalAlign: 'middle' }} /> {error}
+                  </Typography>
+                </Box>
+              )}
+              
+              {/* Indicateur de chargement pendant l'analyse */}
+              {analyzing && (
+                <Box 
+                  sx={{ 
+                    position: 'absolute', 
+                    top: 0, 
+                    left: 0, 
+                    width: '100%', 
+                    height: '100%', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                    borderRadius: '8px'
+                  }}
+                >
+                  <CircularProgress color="primary" />
+                  <Typography variant="body1" color="white" sx={{ ml: 2 }}>
+                    Analyse en cours...
+                  </Typography>
+                </Box>
+              )}
+            </Box>
             
-            // Capturer l'image de la vidéo
-            const video = videoRef.current;
-            const canvas = canvasRef.current;
-            const context = canvas.getContext('2d');
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+              {!cameraActive ? (
+                <Button 
+                  variant="contained" 
+                  color="primary" 
+                  onClick={startCamera}
+                  startIcon={<FaCamera />}
+                  fullWidth
+                >
+                  Démarrer la caméra
+                </Button>
+              ) : (
+                <>
+                  <Button 
+                    variant="outlined" 
+                    color="secondary" 
+                    onClick={stopCamera}
+                    fullWidth
+                  >
+                    Arrêter la caméra
+                  </Button>
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    onClick={captureImage}
+                    startIcon={<FaCameraRetro />}
+                    fullWidth
+                  >
+                    Capturer
+                  </Button>
+                </>
+              )}
+            </Box>
             
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Convertir l'image en base64
-            const imageData = canvas.toDataURL('image/jpeg');
-            
-            // Envoyer l'image à l'API pour analyse
-            const response = await axios.post('http://localhost:5007/analyze', {
-                image: imageData
-            });
-            
-            // Mettre à jour les résultats
-            setResults(response.data);
-            
-            // Dessiner les boîtes englobantes et les informations sur le canvas
-            drawResultsOnCanvas(response.data);
-            
-        } catch (err) {
-            setError("Erreur d'analyse: " + err.message);
-        } finally {
-            setAnalyzing(false);
-        }
-    };
-
-    // Dessiner les résultats sur le canvas
-    const drawResultsOnCanvas = (data) => {
-        if (!canvasRef.current) return;
-        
-        const canvas = canvasRef.current;
-        const context = canvas.getContext('2d');
-        
-        // Effacer le canvas précédent
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Redessiner l'image vidéo
-        if (videoRef.current) {
-            context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        }
-        
-        // Dessiner les boîtes englobantes pour chaque personne
-        data.people.forEach(person => {
-            const { x, y, width, height } = person.position;
-            
-            // Couleur en fonction de la posture
-            let color;
-            switch(person.posture) {
-                case 'debout': color = 'rgba(0, 255, 0, 0.5)'; break;
-                case 'assis': color = 'rgba(255, 255, 0, 0.5)'; break;
-                case 'courbé': color = 'rgba(255, 0, 0, 0.5)'; break;
-                default: color = 'rgba(0, 0, 255, 0.5)';
-            }
-            
-            // Dessiner la boîte englobante
-            context.strokeStyle = color;
-            context.lineWidth = 3;
-            context.strokeRect(x, y, width, height);
-            
-            // Ajouter une étiquette avec la posture
-            context.fillStyle = color;
-            context.fillRect(x, y - 25, 120, 25);
-            context.fillStyle = 'white';
-            context.font = '16px Arial';
-            context.fillText(`${person.posture} (${Math.round(person.confidence * 100)}%)`, x + 5, y - 5);
-        });
-    };
-
-    // Nettoyer les ressources lors du démontage du composant
-    useEffect(() => {
-        return () => {
-            if (videoRef.current && videoRef.current.srcObject) {
-                const tracks = videoRef.current.srcObject.getTracks();
-                tracks.forEach(track => track.stop());
-            }
-            
-            if (analyzeIntervalRef.current) {
-                clearInterval(analyzeIntervalRef.current);
-            }
-        };
-    }, []);
-
-    return (
-        <div className="person-analyzer">
-            <h1>Analyse de Posture en Temps Réel</h1>
-            
-            {error && (
-                <div className="error-message">
-                    <p>{error}</p>
-                    <button onClick={() => setError(null)}>Fermer</button>
-                </div>
+            {capturedImage && (
+              <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
+                <Button 
+                  variant="contained" 
+                  color="success" 
+                  onClick={analyzeImage}
+                  fullWidth
+                  disabled={analyzing}
+                >
+                  Analyser l'image
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  color="error" 
+                  onClick={resetAnalysis}
+                  startIcon={<FaSync />}
+                  fullWidth
+                >
+                  Réinitialiser
+                </Button>
+              </Box>
             )}
+          </Paper>
+        </Grid>
+        
+        <Grid item xs={12} md={6}>
+          <Paper elevation={3} sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Résultats de l'Analyse
+            </Typography>
             
-            <div className="camera-controls">
-                <select 
-                    value={selectedCamera} 
-                    onChange={handleCameraChange}
-                    disabled={cameraActive}
-                >
-                    {availableCameras.map(camera => (
-                        <option key={camera.deviceId} value={camera.deviceId}>
-                            {camera.label || `Caméra ${camera.deviceId.substr(0, 5)}...`}
-                        </option>
-                    ))}
-                </select>
-                
-                <button 
-                    onClick={toggleCamera}
-                    className={cameraActive ? "stop-btn" : "start-btn"}
-                >
-                    {cameraActive ? "Arrêter la Caméra" : "Démarrer la Caméra"}
-                </button>
-                
-                {cameraActive && (
-                    <button 
-                        onClick={captureAndAnalyze}
-                        disabled={analyzing}
-                        className="analyze-btn"
-                    >
-                        {analyzing ? "Analyse en cours..." : "Analyser Maintenant"}
-                    </button>
-                )}
-            </div>
-            
-            <div className="video-container">
-                <video 
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    style={{ display: 'none' }}
-                    onLoadedMetadata={() => {
-                        if (canvasRef.current) {
-                            canvasRef.current.width = videoRef.current.videoWidth;
-                            canvasRef.current.height = videoRef.current.videoHeight;
-                        }
-                    }}
-                />
-                <canvas 
-                    ref={canvasRef}
-                    className="video-canvas"
-                />
-            </div>
-            
-            {results && (
-                <div className="results-container">
-                    <h2>Résultats de l'Analyse</h2>
-                    
-                    <div className="summary">
-                        <div className="total-count">
-                            <h3>Nombre Total de Personnes</h3>
-                            <div className="count-value">{results.total_people}</div>
-                        </div>
-                        
-                        <div className="posture-summary">
-                            <h3>Résumé des Postures</h3>
-                            <div className="posture-grid">
-                                {Object.entries(results.posture_summary || {}).map(([posture, count]) => (
-                                    <div key={posture} className={`posture-item ${posture}`}>
-                                        <div className="posture-label">{posture}</div>
-                                        <div className="posture-count">{count}</div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div className="people-details">
-                        <h3>Détails des Personnes Détectées</h3>
-                        <div className="people-list">
-                            {results.people.map(person => (
-                                <div key={person.id} className="person-card">
-                                    <h4>Personne #{person.id + 1}</h4>
-                                    <p><strong>Posture:</strong> {person.posture}</p>
-                                    <p><strong>Confiance:</strong> {Math.round(person.confidence * 100)}%</p>
-                                    <p><strong>Position:</strong> x:{person.position.x}, y:{person.position.y}</p>
-                                    <p><strong>Dimensions:</strong> {person.position.width}x{person.position.height}</p>
-                                </div>
+            {analysisResults ? (
+              <Box>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Card variant="outlined">
+                      <CardContent>
+                        <Typography variant="subtitle1" color="primary">
+                          <FaUser style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                          Détection
+                        </Typography>
+                        <Typography variant="h4" align="center">
+                          {analysisResults.person_count} {analysisResults.person_count > 1 ? 'personnes' : 'personne'}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Visages: {analysisResults.face_detected ? 'Oui' : 'Non'}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Mains: {analysisResults.hands_detected ? `Oui (${analysisResults.hand_count || 'N/A'})` : 'Non'}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <Card variant="outlined">
+                      <CardContent>
+                        <Typography variant="subtitle1" color="primary">
+                          <FaAccessibleIcon style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                          Posture
+                        </Typography>
+                        {analysisResults.postures && analysisResults.postures.length > 0 ? (
+                          <>
+                            <Typography variant="h6" align="center">
+                              {analysisResults.postures[0].type || "Inconnue"}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Confiance: {Math.round((analysisResults.postures[0].confidence || 0) * 100)}%
+                            </Typography>
+                          </>
+                        ) : (
+                          <Typography variant="body1" align="center">
+                            Aucune posture détectée
+                          </Typography>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  {analysisResults.movement_analysis && Object.keys(analysisResults.movement_analysis).length > 0 && (
+                    <Grid item xs={12}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Typography variant="subtitle1" color="primary">
+                            <FaWalking style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                            Mouvement
+                          </Typography>
+                          <Grid container spacing={1} alignItems="center">
+                            <Grid item xs={6}>
+                              <Typography variant="body1">
+                                Direction: {analysisResults.movement_analysis.direction}
+                                {getDirectionIcon(analysisResults.movement_analysis.direction)}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={6}>
+                              <Typography variant="body1">
+                                <FaTachometerAlt style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                                Vitesse: {Math.round(analysisResults.movement_analysis.speed)}
+                              </Typography>
+                            </Grid>
+                          </Grid>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  )}
+                  
+                  {analysisResults.intention_analysis && analysisResults.intention_analysis.length > 0 && (
+                    <Grid item xs={12}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Typography variant="subtitle1" color="primary">
+                            Intention Probable
+                          </Typography>
+                          <List dense>
+                            {analysisResults.intention_analysis.map((intention, idx) => (
+                              <ListItem key={idx}>
+                                <ListItemIcon>
+                                  {idx === 0 ? <FaArrowRight color="primary"/> : <FaArrowRight style={{ color: 'action' }} />}
+                                </ListItemIcon>
+                                <ListItemText 
+                                  primary={`${intention.intention} (${Math.round(intention.probability * 100)}%)`}
+                                />
+                              </ListItem>
                             ))}
-                        </div>
-                    </div>
-                </div>
+                          </List>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  )}
+                  
+                  {analysisResults.emotions && analysisResults.emotions.length > 0 && (
+                    <Grid item xs={12}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Typography variant="subtitle1" color="primary">
+                            <FaSmile style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                            Expression
+                          </Typography>
+                          <Typography variant="body1" align="center">
+                            {analysisResults.emotions.join(', ')}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  )}
+                  
+                  <Grid item xs={12}>
+                    <Card variant="outlined">
+                      <CardContent>
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Horodatage: {formatTimestamp(analysisResults.timestamp)}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              </Box>
+            ) : (
+              <Box sx={{ p: 4, textAlign: 'center' }}>
+                <Typography variant="body1" color="text.secondary">
+                  Capturez et analysez une image pour voir les résultats ici.
+                </Typography>
+              </Box>
             )}
-        </div>
-    );
+          </Paper>
+        </Grid>
+      </Grid>
+    </Container>
+  );
 };
 
-export default Person;
+export default Open;
+
 
