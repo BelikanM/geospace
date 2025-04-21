@@ -154,7 +154,7 @@ const Audio = () => {
     formData.append('file', audioFile);
 
     try {
-      const response = await axios.post('http://localhost:4500/api/analyze', formData, {
+      const response = await axios.post('http://0.0.0.0:5400/api/analyze', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },

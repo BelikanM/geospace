@@ -447,7 +447,7 @@ export default function Map2D({ initialCenter = [48.8566, 2.3522] }) {
       return new Promise((resolve, reject) => {
         setTimeout(async () => {
           try {
-            const response = await fetch('http://localhost:5000/analyze', {
+            const response = await fetch('https://srv-tddd.onrender.com/analyze', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
