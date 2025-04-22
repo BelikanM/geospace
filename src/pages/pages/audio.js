@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, CircleMarker } from 'react-leaflet';
 import axios from 'axios';
@@ -154,7 +156,7 @@ const Audio = () => {
     formData.append('file', audioFile);
 
     try {
-      const response = await axios.post('http://127.0.0.1:6000/api/analyze', formData, {
+      const response = await axios.post('http://localhost:4500/api/analyze', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
@@ -526,4 +528,5 @@ const Audio = () => {
 };
 
 export default Audio;
+
 
