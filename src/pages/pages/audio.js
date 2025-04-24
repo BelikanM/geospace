@@ -850,34 +850,48 @@ const Analyse = () => {
           </ul>
 
           {/* Historique des détections */}
-          <div className="history-section">
-            <h3>Historique des objets détectés</h3>
-            {history.length === 0 ? (
-              <p>Aucune détection sauvegardée.</p>
-            ) : (
-              <ul className="history-list">
-                {history.map((item, idx) => (
-                  <li key={`${item.class}-${idx}`} className="history-item">
-                    <img src={item.thumbnailUrl} alt={item.class} />
-                    <div>
-                      <strong>{item.icon} {item.class}</strong>
-                      <small>{new Date(item.timestamp).toLocaleString()}</small>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            
-            <motion.button 
-              className="clear-history-btn"
-              whileTap={{ scale: 0.9 }}
-              onClick={clearHistory}
-              disabled={history.length === 0}
-              title="Effacer l'historique"
+<div className="history-section">
+  <h3>Historique des analyses</h3>
+  <div className="history-scrollbox">
+    {history.length === 0 ? (
+      <p>Aucune détection sauvegardée.</p>
+    ) : (
+      <ul className="history-list">
+        {history.map((item, idx) => (
+          <li key={`${item.class}-${idx}`} className="history-item">
+            <img src={item.thumbnailUrl} alt={item.class} />
+            <div className="history-item-info">
+              <strong>{item.icon} {item.class}</strong>
+              <small>{new Date(item.timestamp).toLocaleString()}</small>
+            </div>
+            <button 
+              className="remove-btn" 
+              onClick={(e) => {
+                e.stopPropagation();
+                const newHistory = history.filter((_, index) => index !== idx);
+                setHistory(newHistory);
+                localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
+              }}
             >
-              <FaHistory /> Effacer l'historique
-            </motion.button>
-          </div>
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+  <div className="history-actions">
+    <motion.button 
+      className="clear-history-btn"
+      whileTap={{ scale: 0.9 }}
+      onClick={clearHistory}
+      disabled={history.length === 0}
+      title="Effacer l'historique"
+    >
+      <FaHistory /> Effacer l'historique
+    </motion.button>
+  </div>
+</div>
 
           {/* Paramètres et options */}
           <div className="settings-section">
