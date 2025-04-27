@@ -218,6 +218,11 @@ const Analyse = () => {
   const [saveHistory, setSaveHistory] = useState(true);
   const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
   
+  // Références pour optimisation
+  const lastPredictionsRef = useRef([]);
+  const lastDetectionTimeRef = useRef(0);
+  const detectionInterval = 200; // 5 FPS (200ms entre chaque détection)
+  
   // Effet pour le mode sombre
   useEffect(() => {
     document.body.classList.toggle('dark-mode', darkMode);
@@ -281,8 +286,17 @@ const Analyse = () => {
       !webcamRef.current.video || 
       webcamRef.current.video.readyState !== 4
     ) {
+      requestAnimationFrame(detectFrame);
       return;
     }
+
+    // Limiter la fréquence de détection pour économiser les ressources
+    const now = performance.now();
+    if (now - lastDetectionTimeRef.current < detectionInterval) {
+      requestAnimationFrame(detectFrame);
+      return;
+    }
+    lastDetectionTimeRef.current = now;
 
     try {
       const video = webcamRef.current.video;
@@ -294,7 +308,7 @@ const Analyse = () => {
       canvas.height = video.videoHeight;
 
       // Détection avec le modèle principal
-      const rawPredictions = await modelRef.current.cocoModel.detect(video, 20); // Limiter à 20 détections max
+      const rawPredictions = await modelRef.current.cocoModel.detect(video, 10); // Réduit à 10 objets max
       
       // Filtrer les prédictions avec un score minimum
       const filteredPredictions = rawPredictions
@@ -304,39 +318,46 @@ const Analyse = () => {
       // Enrichir les prédictions avec notre base de connaissances
       const enhancedPredictions = enrichPredictions(filteredPredictions);
       
-      // Mise à jour des prédictions
-      setPredictions(enhancedPredictions);
+      // Vérifier si les prédictions ont changé avant de mettre à jour l'état
+      const lastPredClasses = lastPredictionsRef.current.map(p => p.class + p.score.toFixed(2)).join(',');
+      const newPredClasses = enhancedPredictions.map(p => p.class + p.score.toFixed(2)).join(',');
       
-      // Sauvegarder dans l'historique si une nouvelle détection importante est faite
-      if (saveHistory && enhancedPredictions.length > 0) {
-        const topPrediction = enhancedPredictions[0];
-        const alreadyInHistory = history.some(
-          item => 
-            item.class === topPrediction.class && 
-            new Date().getTime() - new Date(item.timestamp).getTime() < 30000 // 30 secondes
-        );
+      if (lastPredClasses !== newPredClasses) {
+        // Mise à jour des prédictions seulement si changement
+        setPredictions(enhancedPredictions);
+        lastPredictionsRef.current = enhancedPredictions;
         
-        if (!alreadyInHistory && topPrediction.score > 0.7) {
-          setHistory(prev => {
-            const newHistory = [
-              { 
-                ...topPrediction, 
-                timestamp: new Date().toISOString(),
-                thumbnailUrl: captureCurrentFrame(video)
-              }, 
-              ...prev.slice(0, 19)  // Garder les 20 dernières détections max
-            ];
-            // Sauvegarder l'historique dans le localStorage
-            localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
-            return newHistory;
-          });
+        // Sauvegarder dans l'historique si une nouvelle détection importante est faite
+        if (saveHistory && enhancedPredictions.length > 0) {
+          const topPrediction = enhancedPredictions[0];
+          const alreadyInHistory = history.some(
+            item => 
+              item.class === topPrediction.class && 
+              new Date().getTime() - new Date(item.timestamp).getTime() < 30000 // 30 secondes
+          );
           
-          // Notification vocale si activée
-          if (audioEnabled) {
-            const speech = new SpeechSynthesisUtterance(
-              `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
-            );
-            window.speechSynthesis.speak(speech);
+          if (!alreadyInHistory && topPrediction.score > 0.7) {
+            setHistory(prev => {
+              const newHistory = [
+                { 
+                  ...topPrediction, 
+                  timestamp: new Date().toISOString(),
+                  thumbnailUrl: captureCurrentFrame(video)
+                }, 
+                ...prev.slice(0, 19)  // Garder les 20 dernières détections max
+              ];
+              // Sauvegarder l'historique dans le localStorage
+              localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
+              return newHistory;
+            });
+            
+            // Notification vocale si activée
+            if (audioEnabled) {
+              const speech = new SpeechSynthesisUtterance(
+                `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
+              );
+              window.speechSynthesis.speak(speech);
+            }
           }
         }
       }
@@ -344,51 +365,69 @@ const Analyse = () => {
       // Nettoyer canevas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // Appliquer les réglages (luminosité, zoom)
-      ctx.filter = `brightness(${brightness}%)`;
-      ctx.save();
-      if (zoomLevel !== 1) {
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.scale(zoomLevel, zoomLevel);
-        ctx.translate(-canvas.width / 2, -canvas.height / 2);
-      }
-      
-      // Dessiner la vidéo si on veut appliquer des filtres
+      // Appliquer les réglages (luminosité, zoom) seulement si nécessaire
       if (brightness !== 100 || zoomLevel !== 1) {
+        ctx.filter = `brightness(${brightness}%)`;
+        ctx.save();
+        if (zoomLevel !== 1) {
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.scale(zoomLevel, zoomLevel);
+          ctx.translate(-canvas.width / 2, -canvas.height / 2);
+        }
+        
+        // Dessiner la vidéo seulement si on applique des filtres
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        ctx.filter = 'none';
       }
+      // On ne dessine pas la vidéo si pas de filtres, car elle est déjà visible en dessous du canvas
 
       // Dessiner les rectangles de détection
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
         const isSelected = selectedObject && selectedObject.class === prediction.class;
         
-        // Style rectangle avec animation fluide
+        // Style rectangle
         ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
         ctx.lineWidth = isSelected ? 4 : 2;
         ctx.lineJoin = 'round';
         
         // Rectangle avec coins arrondis
-        ctx.beginPath();
-        ctx.roundRect(x, y, width, height, 5);
-        ctx.stroke();
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(x, y, width, height, 5);
+          ctx.stroke();
+        } else {
+          // Fallback pour les navigateurs qui ne supportent pas roundRect
+          ctx.strokeRect(x, y, width, height);
+        }
         
         // Créer une info-bulle avec fond semi-transparent
-        ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
-        
         const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
         const textWidth = ctx.measureText(text).width + 20;
         const bubbleHeight = 30;
         
+        ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+        
         // Dessiner le fond de l'étiquette
         ctx.beginPath();
-        ctx.roundRect(
-          x - 5, 
-          y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5, 
-          textWidth, 
-          bubbleHeight, 
-          5
-        );
+        if (ctx.roundRect) {
+          ctx.roundRect(
+            x - 5, 
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5, 
+            textWidth, 
+            bubbleHeight, 
+            5
+          );
+        } else {
+          // Fallback
+          ctx.fillRect(
+            x - 5, 
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5, 
+            textWidth, 
+            bubbleHeight
+          );
+        }
         ctx.fill();
         
         // Texte de l'étiquette
@@ -399,16 +438,7 @@ const Analyse = () => {
           x + 5, 
           y > bubbleHeight + 10 ? y - bubbleHeight/2 - 5 : y + height + bubbleHeight/2 + 5
         );
-        
-        // Indicateur d'interaction
-        if (detectionMode === "detail") {
-          ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-          ctx.fillText("Touchez pour plus d'infos", x + 5, y + height - 10);
-        }
       });
-      
-      ctx.restore();
-      ctx.filter = 'none';
 
     } catch (error) {
       console.error("Erreur pendant la détection:", error);
@@ -473,7 +503,7 @@ const Analyse = () => {
       await new Promise((resolve) => { img.onload = resolve; });
       
       // Détection sur l'image
-      const rawPredictions = await modelRef.current.cocoModel.detect(img);
+      const rawPredictions = await modelRef.current.cocoModel.detect(img, 10); // Limiter à 10 objets
       const enhancedPredictions = enrichPredictions(
         rawPredictions.filter(p => p.score > 0.5)
       );
@@ -552,53 +582,9 @@ const Analyse = () => {
     return canvas.toDataURL('image/jpeg', 0.5); // Réduire la qualité pour économiser de l'espace
   };
   
-  // Fonction pour changer la caméra (avant/arrière)
+    // Fonction pour changer la caméra (avant/arrière)
   const switchCamera = () => {
-    setCameraFacingMode(prev => prev === "user" ? "environment" : "user");
-  };
-  
-  // Fonction pour sauvegarder l'image courante dans la galerie
-  const saveImage = () => {
-    if (!capturedImage) return;
-    
-    const link = document.createElement('a');
-    link.href = capturedImage;
-    link.download = `detected-objects-${new Date().toISOString()}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    if (audioEnabled) {
-      const speech = new SpeechSynthesisUtterance("Image sauvegardée dans votre galerie");
-      window.speechSynthesis.speak(speech);
-    }
-  };
-  
-  // Fonction pour effacer l'historique
-  const clearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('objectDetectionHistory');
-    
-    if (audioEnabled) {
-      const speech = new SpeechSynthesisUtterance("Historique effacé");
-      window.speechSynthesis.speak(speech);
-    }
-  };
-  
-  // Fonction pour charger une image depuis la galerie
-  const loadImageFromGallery = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setCapturedImage(reader.result);
-        setIsDetecting(false);
-        
-        // Analyser l'image après chargement
-        setTimeout(() => analyzeImage(), 100);
-      };
-      reader.readAsDataURL(file);
-    }
+    setCameraFacingMode(prev => (prev === "user" ? "environment" : "user"));
   };
 
   return (
@@ -616,10 +602,10 @@ const Analyse = () => {
           <p>Préparation des réseaux de neurones et bases de connaissances</p>
         </motion.div>
       )}
-      
+
       {/* Message d'erreur */}
       {errorMessage && (
-        <motion.div 
+        <motion.div
           className="error-message"
           initial={{ opacity: 0, y: -50 }}
           animate={{ opacity: 1, y: 0 }}
@@ -630,7 +616,7 @@ const Analyse = () => {
           <button onClick={() => setErrorMessage(null)}>Fermer</button>
         </motion.div>
       )}
-      
+
       <div className="main-content">
         <div className="camera-container">
           {/* Conteneur de la caméra ou de l'image capturée */}
@@ -641,35 +627,19 @@ const Analyse = () => {
                   ref={webcamRef}
                   audio={false}
                   screenshotFormat="image/jpeg"
-                  videoConstraints={{
-                    facingMode: cameraFacingMode,
-                    aspectRatio: 4/3,
-                  }}
+                  videoConstraints={{ facingMode: cameraFacingMode, aspectRatio: 4/3 }}
                   className="webcam"
-                  style={{ 
-                    filter: `brightness(${brightness}%)`,
-                    transform: `scale(${zoomLevel})` 
-                  }}
+                  style={{ filter: `brightness(${brightness}%)`, transform: `scale(${zoomLevel})` }}
                 />
-                <canvas
-                  ref={canvasRef}
-                  className="detection-canvas"
-                />
+                <canvas ref={canvasRef} className="detection-canvas" />
               </>
             ) : (
               <div className="captured-image-container">
-                <img 
-                  src={capturedImage} 
-                  alt="Captured" 
-                  className="captured-image" 
-                />
-                <canvas
-                  ref={canvasRef}
-                  className="detection-canvas"
-                />
+                <img src={capturedImage} alt="Captured" className="captured-image" />
+                <canvas ref={canvasRef} className="detection-canvas" />
               </div>
             )}
-            
+
             {/* Overlay d'information sur les objets sélectionnés */}
             {selectedObject && (
               <motion.div 
@@ -686,7 +656,7 @@ const Analyse = () => {
                     </div>
                     <span className="close-btn" onClick={() => setSelectedObject(null)}>×</span>
                   </div>
-                  
+
                   <div className="object-body">
                     <div className="confidence-meter">
                       <span>Confiance: {(selectedObject.score * 100).toFixed(1)}%</span>
@@ -700,17 +670,17 @@ const Analyse = () => {
                         ></div>
                       </div>
                     </div>
-                    
+
                     <div className="detail-section">
                       <h4>Caractéristiques</h4>
                       <p>{selectedObject.caracteristiques}</p>
                     </div>
-                    
+
                     <div className="detail-section">
                       <h4>Utilisation</h4>
                       <p>{selectedObject.utilisation}</p>
                     </div>
-                    
+
                     <div className="detail-columns">
                       <div className="detail-column">
                         <h4>Catégories</h4>
@@ -720,7 +690,7 @@ const Analyse = () => {
                           ))}
                         </ul>
                       </div>
-                      
+
                       <div className="detail-column">
                         <h4>Matériaux</h4>
                         <ul>
@@ -730,12 +700,12 @@ const Analyse = () => {
                         </ul>
                       </div>
                     </div>
-                    
+
                     <div className="detail-section">
                       <h4>Histoire</h4>
                       <p>{selectedObject.histoire}</p>
                     </div>
-                    
+
                     <div className="detail-section conseil">
                       <h4>Conseil</h4>
                       <p>{selectedObject.conseil}</p>
@@ -745,7 +715,7 @@ const Analyse = () => {
               </motion.div>
             )}
           </div>
-          
+
           {/* Barre d'outils de la caméra */}
           <div className="camera-toolbar">
             <motion.button 
@@ -756,7 +726,7 @@ const Analyse = () => {
             >
               <FaExchangeAlt />
             </motion.button>
-            
+
             <motion.button 
               whileTap={{ scale: 0.9 }}
               className="tool-button"
@@ -766,16 +736,16 @@ const Analyse = () => {
             >
               <BsZoomOut />
             </motion.button>
-            
+
             <motion.button 
               whileTap={{ scale: 0.9 }}
-              className={`tool-button ${!capturedImage && "primary"}`}
+              className={`tool-button ${!capturedImage ? "primary" : ""}`}
               onClick={capturedImage ? analyzeImage : capturePhoto}
               title={capturedImage ? "Analyser l'image" : "Prendre une photo"}
             >
               <FaCamera />
             </motion.button>
-            
+
             <motion.button 
               whileTap={{ scale: 0.9 }}
               className="tool-button"
@@ -785,18 +755,29 @@ const Analyse = () => {
             >
               <BsZoomIn />
             </motion.button>
-            
+
             <label className="tool-button" title="Charger une image">
               <MdPhotoLibrary />
               <input 
                 type="file" 
                 accept="image/*" 
                 style={{ display: 'none' }} 
-                onChange={loadImageFromGallery}
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      setCapturedImage(reader.result);
+                      setIsDetecting(false);
+                      setTimeout(() => analyzeImage(), 100);
+                    };
+                    reader.readAsDataURL(file);
+                  }
+                }}
               />
             </label>
           </div>
-          
+
           {/* Contrôles supplémentaires quand une image est capturée */}
           {capturedImage && (
             <div className="capture-controls">
@@ -808,9 +789,21 @@ const Analyse = () => {
                 Retour à la caméra
               </motion.button>
               
-                            <motion.button 
+              <motion.button 
                 whileTap={{ scale: 0.9 }}
-                onClick={saveImage}
+                onClick={() => {
+                  if (!capturedImage) return;
+                  const link = document.createElement('a');
+                  link.href = capturedImage;
+                  link.download = `detected-objects-${new Date().toISOString()}.jpg`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  if (audioEnabled) {
+                    const speech = new SpeechSynthesisUtterance("Image sauvegardée dans votre galerie");
+                    window.speechSynthesis.speak(speech);
+                  }
+                }}
                 className="control-button"
               >
                 <FaSave /> Sauvegarder l'image
@@ -850,48 +843,55 @@ const Analyse = () => {
           </ul>
 
           {/* Historique des détections */}
-<div className="history-section">
-  <h3>Historique des analyses</h3>
-  <div className="history-scrollbox">
-    {history.length === 0 ? (
-      <p>Aucune détection sauvegardée.</p>
-    ) : (
-      <ul className="history-list">
-        {history.map((item, idx) => (
-          <li key={`${item.class}-${idx}`} className="history-item">
-            <img src={item.thumbnailUrl} alt={item.class} />
-            <div className="history-item-info">
-              <strong>{item.icon} {item.class}</strong>
-              <small>{new Date(item.timestamp).toLocaleString()}</small>
+          <div className="history-section">
+            <h3>Historique des analyses</h3>
+            <div className="history-scrollbox">
+              {history.length === 0 ? (
+                <p>Aucune détection sauvegardée.</p>
+              ) : (
+                <ul className="history-list">
+                  {history.map((item, idx) => (
+                    <li key={`${item.class}-${idx}`} className="history-item">
+                      <img src={item.thumbnailUrl} alt={item.class} />
+                      <div className="history-item-info">
+                        <strong>{item.icon} {item.class}</strong>
+                        <small>{new Date(item.timestamp).toLocaleString()}</small>
+                      </div>
+                      <button 
+                        className="remove-btn" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const newHistory = history.filter((_, index) => index !== idx);
+                          setHistory(newHistory);
+                          localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
+                        }}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            <button 
-              className="remove-btn" 
-              onClick={(e) => {
-                e.stopPropagation();
-                const newHistory = history.filter((_, index) => index !== idx);
-                setHistory(newHistory);
-                localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
-              }}
-            >
-              ×
-            </button>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-  <div className="history-actions">
-    <motion.button 
-      className="clear-history-btn"
-      whileTap={{ scale: 0.9 }}
-      onClick={clearHistory}
-      disabled={history.length === 0}
-      title="Effacer l'historique"
-    >
-      <FaHistory /> Effacer l'historique
-    </motion.button>
-  </div>
-</div>
+            <div className="history-actions">
+              <motion.button 
+                className="clear-history-btn"
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  setHistory([]);
+                  localStorage.removeItem('objectDetectionHistory');
+                  if (audioEnabled) {
+                    const speech = new SpeechSynthesisUtterance("Historique effacé");
+                    window.speechSynthesis.speak(speech);
+                  }
+                }}
+                disabled={history.length === 0}
+                title="Effacer l'historique"
+              >
+                <FaHistory /> Effacer l'historique
+              </motion.button>
+            </div>
+          </div>
 
           {/* Paramètres et options */}
           <div className="settings-section">
