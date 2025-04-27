@@ -4,7 +4,7 @@ import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaCamera, FaHistory, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaCloudUploadAlt, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
+import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaCloudUploadAlt, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
 import { BsFillLightningFill, BsFillLightningChargeFill, BsZoomIn, BsZoomOut } from 'react-icons/bs';
 import { MdPhotoLibrary, MdFlashOff } from 'react-icons/md';
 import './Analyse.css';
@@ -18,7 +18,10 @@ const objetInfos = {
     categories: ["être vivant", "mammifère"],
     materiaux: ["organique"],
     histoire: "L'être humain moderne (Homo sapiens) existe depuis environ 300 000 ans.",
-    conseil: "Respectez les personnes et leur espace personnel lors de vos prises de vue."
+    conseil: "Respectez les personnes et leur espace personnel lors de vos prises de vue.",
+    dimensionsMoyennes: { hauteur: "1.75m", largeur: "0.5m", profondeur: "0.25m" },
+    poidsEstime: "70kg",
+    textePotentiel: "Vêtements, accessoires, badges"
   },
   cell_phone: {
     icon: '📱',
@@ -27,7 +30,10 @@ const objetInfos = {
     categories: ["électronique", "communication"],
     materiaux: ["métal", "verre", "plastique", "composants électroniques"],
     histoire: "Le premier smartphone largement commercialisé était l'iPhone d'Apple en 2007.",
-    conseil: "Protégez votre téléphone avec une coque et un verre trempé pour prolonger sa durée de vie."
+    conseil: "Protégez votre téléphone avec une coque et un verre trempé pour prolonger sa durée de vie.",
+    dimensionsMoyennes: { hauteur: "15cm", largeur: "7cm", profondeur: "0.8cm" },
+    poidsEstime: "170g",
+    textePotentiel: "Marque, modèle, notifications à l'écran"
   },
   cup: {
     icon: '☕',
@@ -36,7 +42,10 @@ const objetInfos = {
     categories: ["récipient", "ustensile de cuisine"],
     materiaux: ["céramique", "verre", "plastique", "métal", "porcelaine"],
     histoire: "Les premières tasses datent d'environ 10 000 ans avant J.-C., fabriquées en argile.",
-    conseil: "Les tasses en céramique conservent mieux la chaleur des boissons chaudes."
+    conseil: "Les tasses en céramique conservent mieux la chaleur des boissons chaudes.",
+    dimensionsMoyennes: { hauteur: "10cm", diametre: "8cm" },
+    poidsEstime: "300g",
+    textePotentiel: "Logo, nom de marque, inscriptions décoratives"
   },
   chair: {
     icon: '🪑',
@@ -45,7 +54,10 @@ const objetInfos = {
     categories: ["mobilier", "ameublement"],
     materiaux: ["bois", "métal", "plastique", "tissu", "cuir"],
     histoire: "Les chaises existent depuis l'Égypte ancienne, mais n'étaient utilisées que par les personnes de haut rang.",
-    conseil: "Une bonne chaise ergonomique peut prévenir les douleurs dorsales lors d'une utilisation prolongée."
+    conseil: "Une bonne chaise ergonomique peut prévenir les douleurs dorsales lors d'une utilisation prolongée.",
+    dimensionsMoyennes: { hauteur: "85cm", largeur: "45cm", profondeur: "50cm" },
+    poidsEstime: "5-10kg",
+    textePotentiel: "Marque, étiquette de fabrication, code-barre"
   },
   laptop: {
     icon: '💻',
@@ -54,7 +66,10 @@ const objetInfos = {
     categories: ["électronique", "informatique"],
     materiaux: ["aluminium", "plastique", "composants électroniques", "verre"],
     histoire: "Le premier ordinateur portable commercial, l'Osborne 1, est apparu en 1981.",
-    conseil: "Nettoyez régulièrement le clavier et les évents pour prolonger la durée de vie de votre ordinateur portable."
+    conseil: "Nettoyez régulièrement le clavier et les évents pour prolonger la durée de vie de votre ordinateur portable.",
+    dimensionsMoyennes: { hauteur: "1.5-2.5cm", largeur: "30-40cm", profondeur: "20-30cm" },
+    poidsEstime: "1.2-2.5kg",
+    textePotentiel: "Marque, modèle, autocollants, touches de clavier"
   },
   book: {
     icon: '📚',
@@ -63,7 +78,10 @@ const objetInfos = {
     categories: ["objet culturel", "média"],
     materiaux: ["papier", "carton", "encre", "colle", "fil"],
     histoire: "Les premiers livres imprimés datent de la Chine du 9ème siècle, avec l'invention de l'imprimerie par Bi Sheng.",
-    conseil: "Gardez vos livres à l'abri de l'humidité et de la lumière directe du soleil pour préserver leur état."
+    conseil: "Gardez vos livres à l'abri de l'humidité et de la lumière directe du soleil pour préserver leur état.",
+    dimensionsMoyennes: { hauteur: "20-30cm", largeur: "15-20cm", epaisseur: "1-5cm" },
+    poidsEstime: "300-1000g",
+    textePotentiel: "Titre, auteur, éditeur, texte des pages"
   },
   bottle: {
     icon: '🍾',
@@ -72,7 +90,10 @@ const objetInfos = {
     categories: ["contenant", "récipient"],
     materiaux: ["verre", "plastique", "métal", "céramique"],
     histoire: "Les bouteilles en verre sont utilisées depuis l'époque romaine, mais la production industrielle a commencé au 17ème siècle.",
-    conseil: "Les bouteilles réutilisables sont écologiques et économiques à long terme."
+    conseil: "Les bouteilles réutilisables sont écologiques et économiques à long terme.",
+    dimensionsMoyennes: { hauteur: "20-30cm", diametre: "5-10cm" },
+    poidsEstime: "Vide: 100-500g, Pleine: 500-1500g",
+    textePotentiel: "Marque, étiquette, informations nutritionnelles, volume"
   },
   keyboard: {
     icon: '⌨️',
@@ -81,7 +102,10 @@ const objetInfos = {
     categories: ["périphérique", "informatique"],
     materiaux: ["plastique", "métal", "composants électroniques", "caoutchouc"],
     histoire: "Le clavier moderne QWERTY a été inventé par Christopher Latham Sholes en 1868 pour les machines à écrire.",
-    conseil: "Nettoyez régulièrement votre clavier pour éliminer poussière et débris qui peuvent affecter son fonctionnement."
+    conseil: "Nettoyez régulièrement votre clavier pour éliminer poussière et débris qui peuvent affecter son fonctionnement.",
+    dimensionsMoyennes: { hauteur: "2-4cm", largeur: "30-45cm", profondeur: "12-18cm" },
+    poidsEstime: "500-1200g",
+    textePotentiel: "Touches, marque, modèle, indications fonctionnelles"
   },
   backpack: {
     icon: '🎒',
@@ -90,7 +114,10 @@ const objetInfos = {
     categories: ["accessoire", "bagagerie"],
     materiaux: ["tissu", "nylon", "cuir", "polyester", "métal (pour les fermetures)"],
     histoire: "Le sac à dos moderne a été développé dans les années 1920 pour les activités de plein air.",
-    conseil: "Répartissez le poids uniformément et utilisez les deux bretelles pour éviter les douleurs dorsales."
+    conseil: "Répartissez le poids uniformément et utilisez les deux bretelles pour éviter les douleurs dorsales.",
+    dimensionsMoyennes: { hauteur: "40-55cm", largeur: "30-40cm", profondeur: "15-30cm" },
+    poidsEstime: "Vide: 500-1500g",
+    textePotentiel: "Marque, logo, étiquettes de propriété"
   },
   couch: {
     icon: '🛋️',
@@ -99,9 +126,11 @@ const objetInfos = {
     categories: ["mobilier", "ameublement"],
     materiaux: ["bois", "tissu", "cuir", "mousse", "métal"],
     histoire: "Le canapé moderne remonte au 17ème siècle en Europe, mais des meubles similaires existaient dans l'Antiquité.",
-    conseil: "Tournez régulièrement les coussins pour assurer une usure uniforme et prolonger la durée de vie du canapé."
+    conseil: "Tournez régulièrement les coussins pour assurer une usure uniforme et prolonger la durée de vie du canapé.",
+    dimensionsMoyennes: { hauteur: "80-100cm", largeur: "180-250cm", profondeur: "80-120cm" },
+    poidsEstime: "50-150kg",
+    textePotentiel: "Étiquette du fabricant, instructions d'entretien"
   },
-  // Ajout de nouveaux objets
   clock: {
     icon: '🕰️',
     caracteristiques: "Instrument de mesure du temps avec cadran ou affichage numérique, mécanisme interne et souvent aiguilles.",
@@ -109,7 +138,10 @@ const objetInfos = {
     categories: ["instrument", "décoration"],
     materiaux: ["métal", "plastique", "verre", "bois", "composants électroniques"],
     histoire: "Les premières horloges mécaniques sont apparues en Europe au 13ème siècle.",
-    conseil: "Les horloges traditionnelles nécessitent un remontage ou un changement de piles régulier."
+    conseil: "Les horloges traditionnelles nécessitent un remontage ou un changement de piles régulier.",
+    dimensionsMoyennes: { hauteur: "10-30cm", largeur: "10-30cm", profondeur: "3-10cm" },
+    poidsEstime: "500-3000g",
+    textePotentiel: "Chiffres, marque, indications horaires"
   },
   tv: {
     icon: '📺',
@@ -118,7 +150,10 @@ const objetInfos = {
     categories: ["électronique", "multimédia"],
     materiaux: ["plastique", "verre", "composants électroniques", "métal"],
     histoire: "La première télévision commerciale a été introduite dans les années 1920, mais la diffusion de masse a commencé après 1945.",
-    conseil: "Maintenez une distance d'au moins 2.5 fois la diagonale de l'écran pour un confort visuel optimal."
+    conseil: "Maintenez une distance d'au moins 2.5 fois la diagonale de l'écran pour un confort visuel optimal.",
+    dimensionsMoyennes: { hauteur: "40-80cm", largeur: "60-200cm", profondeur: "3-10cm" },
+    poidsEstime: "5-50kg selon la taille",
+    textePotentiel: "Marque, modèle, boutons d'interface, menus à l'écran"
   },
   mouse: {
     icon: '🖱️',
@@ -127,7 +162,10 @@ const objetInfos = {
     categories: ["périphérique", "informatique"],
     materiaux: ["plastique", "composants électroniques", "métal"],
     histoire: "La première souris a été inventée par Douglas Engelbart en 1963 et présentée publiquement en 1968.",
-    conseil: "Utilisez un tapis de souris pour améliorer la précision et protéger la surface de votre bureau."
+    conseil: "Utilisez un tapis de souris pour améliorer la précision et protéger la surface de votre bureau.",
+    dimensionsMoyennes: { hauteur: "3-4cm", largeur: "6-8cm", longueur: "10-13cm" },
+    poidsEstime: "80-150g",
+    textePotentiel: "Marque, modèle, indications des boutons"
   },
   remote: {
     icon: '🎮',
@@ -136,7 +174,10 @@ const objetInfos = {
     categories: ["électronique", "contrôle"],
     materiaux: ["plastique", "caoutchouc", "composants électroniques"],
     histoire: "Les premières télécommandes pour téléviseurs sont apparues dans les années 1950.",
-    conseil: "Nettoyez régulièrement votre télécommande, car elle peut accumuler beaucoup de bactéries avec l'utilisation."
+    conseil: "Nettoyez régulièrement votre télécommande, car elle peut accumuler beaucoup de bactéries avec l'utilisation.",
+    dimensionsMoyennes: { hauteur: "1-2cm", largeur: "4-6cm", longueur: "15-20cm" },
+    poidsEstime: "100-200g avec piles",
+    textePotentiel: "Boutons numérotés, indications de fonctions, marque"
   },
   microwave: {
     icon: '📠',
@@ -145,7 +186,10 @@ const objetInfos = {
     categories: ["électroménager", "cuisine"],
     materiaux: ["métal", "plastique", "verre", "composants électroniques"],
     histoire: "Le premier four à micro-ondes commercial, le Radarange, a été lancé en 1947 par Raytheon.",
-    conseil: "Évitez de mettre des objets métalliques dans un micro-ondes en fonctionnement pour éviter les arcs électriques."
+    conseil: "Évitez de mettre des objets métalliques dans un micro-ondes en fonctionnement pour éviter les arcs électriques.",
+    dimensionsMoyennes: { hauteur: "30-40cm", largeur: "45-60cm", profondeur: "30-45cm" },
+    poidsEstime: "10-20kg",
+    textePotentiel: "Marque, modèle, boutons de contrôle, indications de puissance"
   },
   umbrella: {
     icon: '☂️',
@@ -154,9 +198,11 @@ const objetInfos = {
     categories: ["accessoire", "protection"],
     materiaux: ["tissu", "métal", "plastique", "fibre de verre"],
     histoire: "Les parapluies existent depuis plus de 4000 ans, d'abord utilisés comme protection solaire en Égypte et Chine anciennes.",
-    conseil: "Laissez sécher votre parapluie ouvert après utilisation pour éviter la moisissure et la rouille."
-  },
-  // Ajoutez d'autres objets selon vos besoins
+    conseil: "Laissez sécher votre parapluie ouvert après utilisation pour éviter la moisissure et la rouille.",
+    dimensionsMoyennes: { hauteur: "60-100cm (fermé)", diametre: "80-120cm (ouvert)" },
+    poidsEstime: "300-800g",
+    textePotentiel: "Marque, motifs décoratifs"
+  }
 };
 
 // Fonction pour charger un modèle personnalisé en complément de coco-ssd
@@ -179,16 +225,78 @@ const enrichPredictions = (predictions) => {
       categories: ["non classifié"],
       materiaux: ["inconnu"],
       histoire: "Histoire non documentée.",
-      conseil: "Aucun conseil disponible."
+      conseil: "Aucun conseil disponible.",
+      dimensionsMoyennes: { notes: "Dimensions inconnues" },
+      poidsEstime: "Inconnu",
+      textePotentiel: "Texte inconnu"
     };
+    
+    // Calcul de l'estimation des dimensions réelles basées sur la taille du box
+    const [x, y, width, height] = prediction.bbox;
+    const aspectRatio = width / height;
+    
+    // Estimation de la taille réelle (approximative)
+    let tailleEstimee = null;
+    if (baseInfo.dimensionsMoyennes) {
+      // Tentative d'estimation des dimensions réelles basée sur les connaissances de l'objet
+      tailleEstimee = {
+        ...baseInfo.dimensionsMoyennes,
+        ratioImage: aspectRatio.toFixed(2),
+        surface: `${(width * height).toFixed(0)} pixels²`,
+        proportionImage: `${((width * height) / (640 * 480) * 100).toFixed(1)}% de l'image`
+      };
+    }
     
     return {
       ...prediction,
       ...baseInfo,
       detectedAt: new Date().toISOString(),
       certainty: prediction.score > 0.8 ? "Élevée" : prediction.score > 0.6 ? "Moyenne" : "Faible",
+      dimensions: {
+        pixels: { width: width.toFixed(0), height: height.toFixed(0) },
+        estimationTailleReelle: tailleEstimee
+      },
+      analyseTexte: {
+        potentiel: baseInfo.textePotentiel,
+        zoneTexte: width > 100 && height > 30 ? "Zone suffisante pour contenir du texte" : "Zone probablement trop petite pour du texte lisible"
+      }
     };
   });
+};
+
+// Fonction pour analyser l'image et estimer les dimensions des objets
+const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
+  const [x, y, width, height] = prediction.bbox;
+  
+  // Calculer la proportion de l'objet dans l'image
+  const proportionLargeur = width / videoWidth;
+  const proportionHauteur = height / videoHeight;
+  const proportionSurface = (width * height) / (videoWidth * videoHeight);
+  
+  // Estimer la distance de l'objet (très approximatif)
+  // Plus l'objet occupe une grande partie de l'image, plus il est probablement proche
+  let distanceEstimee = "indéterminée";
+  if (proportionSurface > 0.5) distanceEstimee = "très proche";
+  else if (proportionSurface > 0.25) distanceEstimee = "proche";
+  else if (proportionSurface > 0.1) distanceEstimee = "distance moyenne";
+  else if (proportionSurface > 0.05) distanceEstimee = "éloigné";
+  else distanceEstimee = "très éloigné";
+  
+  // Estimation du rapport taille réelle / taille perçue
+  return {
+    proportionImage: {
+      largeur: `${(proportionLargeur * 100).toFixed(1)}%`,
+      hauteur: `${(proportionHauteur * 100).toFixed(1)}%`,
+      surface: `${(proportionSurface * 100).toFixed(1)}%`
+    },
+    taillePixels: {
+      largeur: Math.round(width),
+      hauteur: Math.round(height),
+      rapport: (width / height).toFixed(2)
+    },
+    distanceEstimee,
+    dimensionsEstimees: prediction.dimensionsMoyennes || "Données non disponibles"
+  };
 };
 
 const Analyse = () => {
@@ -198,7 +306,6 @@ const Analyse = () => {
   
   // États de l'application
   const [predictions, setPredictions] = useState([]);
-  const [history, setHistory] = useState([]);
   const [isDetecting, setIsDetecting] = useState(true);
   const [selectedObject, setSelectedObject] = useState(null);
   const [cameraFacingMode, setCameraFacingMode] = useState("environment");
@@ -215,8 +322,10 @@ const Analyse = () => {
   const [darkMode, setDarkMode] = useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
   
   // Options de confidentialité
-  const [saveHistory, setSaveHistory] = useState(true);
   const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
+  
+  // Analyse des objets
+  const [objectAnalyses, setObjectAnalyses] = useState({});
   
   // Références pour optimisation
   const lastPredictionsRef = useRef([]);
@@ -327,38 +436,26 @@ const Analyse = () => {
         setPredictions(enhancedPredictions);
         lastPredictionsRef.current = enhancedPredictions;
         
-        // Sauvegarder dans l'historique si une nouvelle détection importante est faite
-        if (saveHistory && enhancedPredictions.length > 0) {
+        // Analyser les dimensions des objets détectés
+        const newAnalyses = {};
+        enhancedPredictions.forEach(pred => {
+          const objectId = `${pred.class}-${Math.random().toString(36).substr(2, 5)}`;
+          newAnalyses[objectId] = {
+            ...pred,
+            analyseComplete: analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight),
+            horodatage: new Date().toISOString()
+          };
+        });
+        
+        setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
+        
+        // Notification vocale si activée
+        if (audioEnabled && enhancedPredictions.length > 0 && enhancedPredictions[0].score > 0.7) {
           const topPrediction = enhancedPredictions[0];
-          const alreadyInHistory = history.some(
-            item => 
-              item.class === topPrediction.class && 
-              new Date().getTime() - new Date(item.timestamp).getTime() < 30000 // 30 secondes
+          const speech = new SpeechSynthesisUtterance(
+            `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
           );
-          
-          if (!alreadyInHistory && topPrediction.score > 0.7) {
-            setHistory(prev => {
-              const newHistory = [
-                { 
-                  ...topPrediction, 
-                  timestamp: new Date().toISOString(),
-                  thumbnailUrl: captureCurrentFrame(video)
-                }, 
-                ...prev.slice(0, 19)  // Garder les 20 dernières détections max
-              ];
-              // Sauvegarder l'historique dans le localStorage
-              localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
-              return newHistory;
-            });
-            
-            // Notification vocale si activée
-            if (audioEnabled) {
-              const speech = new SpeechSynthesisUtterance(
-                `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
-              );
-              window.speechSynthesis.speak(speech);
-            }
-          }
+          window.speechSynthesis.speak(speech);
         }
       }
 
@@ -380,81 +477,72 @@ const Analyse = () => {
         ctx.restore();
         ctx.filter = 'none';
       }
-      // On ne dessine pas la vidéo si pas de filtres, car elle est déjà visible en dessous du canvas
-
-      // Dessiner les rectangles de détection
+           // Dessiner les rectangles de détection
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
         const isSelected = selectedObject && selectedObject.class === prediction.class;
-        
+
         // Style rectangle
         ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
         ctx.lineWidth = isSelected ? 4 : 2;
         ctx.lineJoin = 'round';
-        
-        // Rectangle avec coins arrondis
+
         if (ctx.roundRect) {
           ctx.beginPath();
           ctx.roundRect(x, y, width, height, 5);
           ctx.stroke();
         } else {
-          // Fallback pour les navigateurs qui ne supportent pas roundRect
           ctx.strokeRect(x, y, width, height);
         }
-        
+
         // Créer une info-bulle avec fond semi-transparent
         const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
         const textWidth = ctx.measureText(text).width + 20;
         const bubbleHeight = 30;
-        
+
         ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
-        
-        // Dessiner le fond de l'étiquette
+
         ctx.beginPath();
         if (ctx.roundRect) {
           ctx.roundRect(
-            x - 5, 
-            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5, 
-            textWidth, 
-            bubbleHeight, 
+            x - 5,
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
+            textWidth,
+            bubbleHeight,
             5
           );
         } else {
-          // Fallback
           ctx.fillRect(
-            x - 5, 
-            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5, 
-            textWidth, 
+            x - 5,
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
+            textWidth,
             bubbleHeight
           );
         }
         ctx.fill();
-        
+
         // Texte de l'étiquette
         ctx.fillStyle = '#FFFFFF';
         ctx.font = 'bold 16px Arial';
         ctx.fillText(
-          text, 
-          x + 5, 
-          y > bubbleHeight + 10 ? y - bubbleHeight/2 - 5 : y + height + bubbleHeight/2 + 5
+          text,
+          x + 5,
+          y > bubbleHeight + 10 ? y - bubbleHeight / 2 - 5 : y + height + bubbleHeight / 2 + 5
         );
       });
-
     } catch (error) {
       console.error("Erreur pendant la détection:", error);
     }
-    
-    // Planifier la prochaine détection
+
+    // Prochaine frame de détection
     requestAnimationFrame(detectFrame);
   }, [
-    isDetecting, 
-    history, 
-    selectedObject, 
-    zoomLevel, 
-    brightness, 
-    audioEnabled, 
-    detectionMode, 
-    saveHistory
+    isDetecting,
+    selectedObject,
+    zoomLevel,
+    brightness,
+    audioEnabled,
+    detectionMode
   ]);
 
   // Démarrer la détection en boucle
@@ -464,134 +552,87 @@ const Analyse = () => {
     }
   }, [detectFrame, loadingModel]);
 
-  // Charger l'historique depuis le localStorage au démarrage
-  useEffect(() => {
-    try {
-      const savedHistory = localStorage.getItem('objectDetectionHistory');
-      if (savedHistory) {
-        setHistory(JSON.parse(savedHistory));
-      }
-    } catch (e) {
-      console.error("Erreur lors du chargement de l'historique:", e);
-    }
-  }, []);
-
-  // Fonction pour capturer une image de la webcam
+  // Fonction pour capturer une photo
   const capturePhoto = () => {
     if (webcamRef.current) {
       const imageSrc = webcamRef.current.getScreenshot();
       setCapturedImage(imageSrc);
       setIsDetecting(false);
-      
+
       if (audioEnabled) {
         const speech = new SpeechSynthesisUtterance("Photo capturée");
         window.speechSynthesis.speak(speech);
       }
     }
   };
-  
-  // Fonction pour analyser une image capturée
+
+  // Analyser la photo chargée (comme pour une image capturée)
   const analyzeImage = async () => {
     if (!capturedImage || !modelRef.current?.cocoModel) return;
-    
+
     try {
-      // Créer un élément image pour l'analyse
       const img = new Image();
+      img.crossOrigin = "anonymous"; // Pour éviter les erreurs CORS si nécessaire
       img.src = capturedImage;
-      
-      // Attendre que l'image soit chargée
-      await new Promise((resolve) => { img.onload = resolve; });
-      
-      // Détection sur l'image
-      const rawPredictions = await modelRef.current.cocoModel.detect(img, 10); // Limiter à 10 objets
-      const enhancedPredictions = enrichPredictions(
-        rawPredictions.filter(p => p.score > 0.5)
-      );
-      
+
+      await new Promise(resolve => { img.onload = resolve; });
+
+      const rawPredictions = await modelRef.current.cocoModel.detect(img, 10);
+      const enhancedPredictions = enrichPredictions(rawPredictions.filter(p => p.score > 0.5));
+
       setPredictions(enhancedPredictions);
-      
-      // Dessiner les résultats sur l'image capturée
+
+      // Dessiner sur le canvas
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
-      
+
       canvas.width = img.width;
       canvas.height = img.height;
-      
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
-      
-      // Dessiner les rectangles de détection
+
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
-        
-        // Style rectangle
+
         ctx.strokeStyle = '#00FFFF';
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
-        
-        // Rectangle
+
         ctx.strokeRect(x, y, width, height);
-        
-        // Étiquette
+
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(x, y > 20 ? y - 25 : y + height, width, 25);
-        
+
         ctx.fillStyle = '#FFFFFF';
         ctx.font = '16px Arial';
         ctx.fillText(
-          `${prediction.class} ${(prediction.score * 100).toFixed(0)}%`, 
-          x + 5, 
+          `${prediction.class} ${(prediction.score * 100).toFixed(0)}%`,
+          x + 5,
           y > 20 ? y - 7 : y + height + 18
         );
       });
-      
-      // Ajouter à l'historique
-      if (saveHistory && enhancedPredictions.length > 0) {
-        setHistory(prev => {
-          const newHistory = [
-            { 
-              ...enhancedPredictions[0], 
-              timestamp: new Date().toISOString(),
-              thumbnailUrl: capturedImage
-            }, 
-            ...prev.slice(0, 19)
-          ];
-          localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
-          return newHistory;
-        });
-      }
-      
-    } catch (error) {
-      console.error("Erreur lors de l'analyse de l'image:", error);
+    } catch (e) {
+      console.error("Erreur lors de l'analyse de l'image:", e);
     }
   };
-  
-  // Fonction pour reprendre la détection en direct
+
+  // Retour caméra live
   const resumeLiveDetection = () => {
     setCapturedImage(null);
     setIsDetecting(true);
   };
-  
-  // Fonction utilitaire pour capturer une frame en base64
-  const captureCurrentFrame = (videoElement) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = videoElement.videoWidth;
-    canvas.height = videoElement.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.5); // Réduire la qualité pour économiser de l'espace
-  };
-  
-    // Fonction pour changer la caméra (avant/arrière)
+
+  // Changer caméra (avant/arrière)
   const switchCamera = () => {
     setCameraFacingMode(prev => (prev === "user" ? "environment" : "user"));
   };
 
   return (
     <div className={`analyse-container ${darkMode ? 'dark-mode' : 'light-mode'}`}>
-      {/* Overlay de chargement */}
+      {/* Loading overlay */}
       {loadingModel && (
-        <motion.div 
+        <motion.div
           className="loading-overlay"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -603,7 +644,7 @@ const Analyse = () => {
         </motion.div>
       )}
 
-      {/* Message d'erreur */}
+      {/* Error message */}
       {errorMessage && (
         <motion.div
           className="error-message"
@@ -619,7 +660,6 @@ const Analyse = () => {
 
       <div className="main-content">
         <div className="camera-container">
-          {/* Conteneur de la caméra ou de l'image capturée */}
           <div className="camera-view">
             {!capturedImage ? (
               <>
@@ -627,7 +667,7 @@ const Analyse = () => {
                   ref={webcamRef}
                   audio={false}
                   screenshotFormat="image/jpeg"
-                  videoConstraints={{ facingMode: cameraFacingMode, aspectRatio: 4/3 }}
+                  videoConstraints={{ facingMode: cameraFacingMode, aspectRatio: 4 / 3 }}
                   className="webcam"
                   style={{ filter: `brightness(${brightness}%)`, transform: `scale(${zoomLevel})` }}
                 />
@@ -640,9 +680,9 @@ const Analyse = () => {
               </div>
             )}
 
-            {/* Overlay d'information sur les objets sélectionnés */}
+            {/* Overlay infos objet sélectionné */}
             {selectedObject && (
-              <motion.div 
+              <motion.div
                 className="object-detail-overlay"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -661,11 +701,16 @@ const Analyse = () => {
                     <div className="confidence-meter">
                       <span>Confiance: {(selectedObject.score * 100).toFixed(1)}%</span>
                       <div className="progress-bar">
-                        <div 
-                          className="progress" 
-                          style={{ 
+                        <div
+                          className="progress"
+                          style={{
                             width: `${selectedObject.score * 100}%`,
-                            backgroundColor: selectedObject.score > 0.7 ? '#4CAF50' : selectedObject.score > 0.5 ? '#FFC107' : '#F44336'
+                            backgroundColor:
+                              selectedObject.score > 0.7
+                                ? '#4CAF50'
+                                : selectedObject.score > 0.5
+                                  ? '#FFC107'
+                                  : '#F44336'
                           }}
                         ></div>
                       </div>
@@ -702,6 +747,29 @@ const Analyse = () => {
                     </div>
 
                     <div className="detail-section">
+                      <h4>Dimensions Moyennes</h4>
+                      <pre style={{ whiteSpace: 'pre-wrap' }}>
+                        {JSON.stringify(selectedObject.dimensionsMoyennes, null, 2)}
+                      </pre>
+                      <p><strong>Poids estimé:</strong> {selectedObject.poidsEstime}</p>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Analyse de la taille sur l'image</h4>
+                      <pre style={{ whiteSpace: 'pre-wrap' }}>
+                        {selectedObject.analyseComplete
+                          ? JSON.stringify(selectedObject.analyseComplete, null, 2)
+                          : 'Non disponible'}
+                      </pre>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Analyse du texte potentiel</h4>
+                      <p><strong>Potentiel:</strong> {selectedObject.analyseTexte?.potentiel || 'Non spécifié'}</p>
+                      <p><strong>Zone disponible:</strong> {selectedObject.analyseTexte?.zoneTexte || 'Non spécifiée'}</p>
+                    </div>
+
+                    <div className="detail-section">
                       <h4>Histoire</h4>
                       <p>{selectedObject.histoire}</p>
                     </div>
@@ -716,9 +784,9 @@ const Analyse = () => {
             )}
           </div>
 
-          {/* Barre d'outils de la caméra */}
+          {/* Toolbar caméra */}
           <div className="camera-toolbar">
-            <motion.button 
+            <motion.button
               whileTap={{ scale: 0.9 }}
               className="tool-button"
               onClick={switchCamera}
@@ -727,7 +795,7 @@ const Analyse = () => {
               <FaExchangeAlt />
             </motion.button>
 
-            <motion.button 
+            <motion.button
               whileTap={{ scale: 0.9 }}
               className="tool-button"
               onClick={() => setZoomLevel(prev => Math.max(1, prev - 0.1))}
@@ -737,7 +805,7 @@ const Analyse = () => {
               <BsZoomOut />
             </motion.button>
 
-            <motion.button 
+            <motion.button
               whileTap={{ scale: 0.9 }}
               className={`tool-button ${!capturedImage ? "primary" : ""}`}
               onClick={capturedImage ? analyzeImage : capturePhoto}
@@ -746,7 +814,7 @@ const Analyse = () => {
               <FaCamera />
             </motion.button>
 
-            <motion.button 
+            <motion.button
               whileTap={{ scale: 0.9 }}
               className="tool-button"
               onClick={() => setZoomLevel(prev => Math.min(3, prev + 0.1))}
@@ -758,11 +826,11 @@ const Analyse = () => {
 
             <label className="tool-button" title="Charger une image">
               <MdPhotoLibrary />
-              <input 
-                type="file" 
-                accept="image/*" 
-                style={{ display: 'none' }} 
-                onChange={(e) => {
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={e => {
                   const file = e.target.files[0];
                   if (file) {
                     const reader = new FileReader();
@@ -778,18 +846,18 @@ const Analyse = () => {
             </label>
           </div>
 
-          {/* Contrôles supplémentaires quand une image est capturée */}
+          {/* Contrôles image capturée */}
           {capturedImage && (
             <div className="capture-controls">
-              <motion.button 
+              <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={resumeLiveDetection}
                 className="control-button"
               >
                 Retour à la caméra
               </motion.button>
-              
-              <motion.button 
+
+              <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={() => {
                   if (!capturedImage) return;
@@ -812,7 +880,7 @@ const Analyse = () => {
           )}
         </div>
 
-        {/* Liste des objets détectés en temps réel */}
+        {/* Liste objets détectés et analyses */}
         <div className="detected-list-container">
           <h2>Objets détectés</h2>
           {predictions.length === 0 && !loadingModel && <p>En attente de détection...</p>}
@@ -820,12 +888,11 @@ const Analyse = () => {
           <ul className="detected-list">
             <AnimatePresence>
               {predictions.map((item, index) => (
-                <motion.li 
+                <motion.li
                   key={`${item.class}-${index}`}
                   className={`detected-item ${selectedObject?.class === item.class ? "selected" : ""}`}
                   onClick={() => {
-                    if(selectedObject?.class === item.class) setSelectedObject(null);
-                    else setSelectedObject(item);
+                    setSelectedObject(selectedObject?.class === item.class ? null : item);
                   }}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -841,145 +908,84 @@ const Analyse = () => {
               ))}
             </AnimatePresence>
           </ul>
+        </div>
 
-          {/* Historique des détections */}
-          <div className="history-section">
-            <h3>Historique des analyses</h3>
-            <div className="history-scrollbox">
-              {history.length === 0 ? (
-                <p>Aucune détection sauvegardée.</p>
-              ) : (
-                <ul className="history-list">
-                  {history.map((item, idx) => (
-                    <li key={`${item.class}-${idx}`} className="history-item">
-                      <img src={item.thumbnailUrl} alt={item.class} />
-                      <div className="history-item-info">
-                        <strong>{item.icon} {item.class}</strong>
-                        <small>{new Date(item.timestamp).toLocaleString()}</small>
-                      </div>
-                      <button 
-                        className="remove-btn" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const newHistory = history.filter((_, index) => index !== idx);
-                          setHistory(newHistory);
-                          localStorage.setItem('objectDetectionHistory', JSON.stringify(newHistory));
-                        }}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div className="history-actions">
-              <motion.button 
-                className="clear-history-btn"
-                whileTap={{ scale: 0.9 }}
-                onClick={() => {
-                  setHistory([]);
-                  localStorage.removeItem('objectDetectionHistory');
-                  if (audioEnabled) {
-                    const speech = new SpeechSynthesisUtterance("Historique effacé");
-                    window.speechSynthesis.speak(speech);
-                  }
-                }}
-                disabled={history.length === 0}
-                title="Effacer l'historique"
+        {/* Paramètres */}
+        <div className="settings-section">
+          <h3>Paramètres</h3>
+          <div className="setting-item">
+            <label>
+              <input
+                type="checkbox"
+                checked={darkMode}
+                onChange={() => setDarkMode(!darkMode)}
+              /> Mode sombre
+            </label>
+          </div>
+          <div className="setting-item">
+            <label>
+              <input
+                type="checkbox"
+                checked={audioEnabled}
+                onChange={() => setAudioEnabled(!audioEnabled)}
+              /> Commentaires audio activés
+            </label>
+          </div>
+          <div className="setting-item">
+            <label>
+              Mode détection:&nbsp;
+              <select
+                value={detectionMode}
+                onChange={(e) => setDetectionMode(e.target.value)}
               >
-                <FaHistory /> Effacer l'historique
-              </motion.button>
-            </div>
+                <option value="normal">Normal</option>
+                <option value="fast">Rapide</option>
+                <option value="detail">Détaillé</option>
+              </select>
+            </label>
           </div>
-
-          {/* Paramètres et options */}
-          <div className="settings-section">
-            <h3>Paramètres</h3>
-            <div className="setting-item">
-              <label>
-                <input 
-                  type="checkbox" 
-                  checked={darkMode} 
-                  onChange={() => setDarkMode(!darkMode)} 
-                /> Mode sombre
-              </label>
-            </div>
-            <div className="setting-item">
-              <label>
-                <input 
-                  type="checkbox" 
-                  checked={audioEnabled} 
-                  onChange={() => setAudioEnabled(!audioEnabled)} 
-                /> Commentaires audio activés
-              </label>
-            </div>
-            <div className="setting-item">
-              <label>
-                <input 
-                  type="checkbox" 
-                  checked={saveHistory} 
-                  onChange={() => setSaveHistory(!saveHistory)} 
-                /> Sauvegarder historique des détections
-              </label>
-            </div>
-            <div className="setting-item">
-              <label>
-                Mode détection:&nbsp;
-                <select 
-                  value={detectionMode} 
-                  onChange={(e) => setDetectionMode(e.target.value)}
-                >
-                  <option value="normal">Normal</option>
-                  <option value="fast">Rapide</option>
-                  <option value="detail">Détaillé</option>
-                </select>
-              </label>
-            </div>
-            <div className="setting-item">
-              <label>
-                Luminosité:&nbsp;
-                <input 
-                  type="range" 
-                  min="50" 
-                  max="150" 
-                  value={brightness} 
-                  onChange={(e) => setBrightness(Number(e.target.value))} 
-                />&nbsp;{brightness}%
-              </label>
-            </div>
-            <motion.button 
-              className="settings-toggle-btn"
-              onClick={() => setShowSettings(!showSettings)}
-              whileTap={{ scale: 0.9 }}
-            >
-              <FaCog /> {showSettings ? "Cacher" : "Afficher"} paramètres avancés
-            </motion.button>
-
-            {/* Options avancées */}
-            <AnimatePresence>
-              {showSettings && (
-                <motion.div 
-                  className="settings-advanced"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                >
-                  <div className="setting-item">
-                    <label>
-                      <input 
-                        type="checkbox"
-                        checked={enableCloudAnalysis}
-                        onChange={() => setEnableCloudAnalysis(!enableCloudAnalysis)}
-                      /> Analyse dans le cloud (bientôt disponible)
-                    </label>
-                    <small className="coming-soon">⚠️</small>
-                  </div>
-                  {/* Ici vous pouvez ajouter d’autres fonctionnalités avancées */}
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <div className="setting-item">
+            <label>
+              Luminosité:&nbsp;
+              <input
+                type="range"
+                min="50"
+                max="150"
+                value={brightness}
+                onChange={(e) => setBrightness(Number(e.target.value))}
+              />&nbsp;{brightness}%
+            </label>
           </div>
+          <motion.button
+            className="settings-toggle-btn"
+            onClick={() => setShowSettings(!showSettings)}
+            whileTap={{ scale: 0.9 }}
+          >
+            <FaCog /> {showSettings ? "Cacher" : "Afficher"} paramètres avancés
+          </motion.button>
+
+          {/* Options avancées */}
+          <AnimatePresence>
+            {showSettings && (
+              <motion.div
+                className="settings-advanced"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <div className="setting-item">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={enableCloudAnalysis}
+                      onChange={() => setEnableCloudAnalysis(!enableCloudAnalysis)}
+                    /> Analyse dans le cloud (bientôt disponible)
+                  </label>
+                  <small className="coming-soon">⚠️</small>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>
