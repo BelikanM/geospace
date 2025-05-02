@@ -113,6 +113,85 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
 };
 
 /**
+ * Gestion intelligente des commentaires vocaux
+ */
+class SpeechManager {
+  constructor() {
+    this.queue = [];
+    this.speaking = false;
+    this.lastMessages = {};
+    this.cooldowns = {};
+    this.enabled = true;
+  }
+
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.cancel();
+    }
+  }
+
+  cancel() {
+    window.speechSynthesis.cancel();
+    this.queue = [];
+    this.speaking = false;
+  }
+
+  // Utiliser cette méthode pour ajouter un message à la file d'attente
+  speak(text, priority = 1, objectId = null) {
+    if (!this.enabled) return;
+    
+    // Éviter les messages répétés trop fréquemment pour le même objet
+    if (objectId) {
+      const now = Date.now();
+      const lastSpoken = this.lastMessages[objectId] || 0;
+      const cooldown = this.cooldowns[objectId] || 2000; // 2 secondes par défaut
+      
+      if (now - lastSpoken < cooldown) {
+        return; // Ignore ce message, trop récent pour cet objet
+      }
+      
+      this.lastMessages[objectId] = now;
+      
+      // Augmenter progressivement le cooldown pour éviter trop de mises à jour
+      this.cooldowns[objectId] = Math.min(5000, cooldown + 500);
+    }
+
+    const message = { text, priority, timestamp: Date.now() };
+    
+    // Ajouter le message à la file dans l'ordre de priorité
+    const insertIndex = this.queue.findIndex(item => item.priority < priority);
+    if (insertIndex === -1) {
+      this.queue.push(message);
+    } else {
+      this.queue.splice(insertIndex, 0, message);
+    }
+    
+    this.processQueue();
+  }
+
+  // Traite la file de messages
+  processQueue() {
+    if (this.speaking || this.queue.length === 0) return;
+    
+    const message = this.queue.shift();
+    this.speaking = true;
+    
+    const utterance = new SpeechSynthesisUtterance(message.text);
+    utterance.lang = 'fr-FR';
+    utterance.rate = 1.1; // Légèrement plus rapide pour une expérience plus fluide
+    
+    utterance.onend = () => {
+      this.speaking = false;
+      // Attendre un court instant avant de traiter le message suivant
+      setTimeout(() => this.processQueue(), 300);
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  }
+}
+
+/**
  * Composant principal d'analyse d'objets en temps réel
  */
 const Analyse = () => {
@@ -120,7 +199,7 @@ const Analyse = () => {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const modelRef = useRef(null);
-  const speechSynthesisRef = useRef(null);
+  const speechManagerRef = useRef(new SpeechManager());
 
   // États
   const [predictions, setPredictions] = useState([]);
@@ -138,22 +217,23 @@ const Analyse = () => {
   const [darkMode, setDarkMode] = useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
   const [objectAnalyses, setObjectAnalyses] = useState({});
+  const [lastSceneDescription, setLastSceneDescription] = useState("");
 
   // Références pour optimisation
   const lastPredictionsRef = useRef([]);
+  const objectHistoryRef = useRef({}); // Pour suivre l'historique de chaque objet détecté
   const lastDetectionTimeRef = useRef(0);
-  const detectionInterval = detectionMode === "fast" ? 300 : detectionMode === "detail" ? 100 : 200; 
+  const detectionInterval = detectionMode === "fast" ? 300 : detectionMode === "detail" ? 100 : 200;
+  const lastDescriptionTimeRef = useRef(0);
   
   // Appliquer le mode sombre
   useEffect(() => {
     document.body.classList.toggle('dark-mode', darkMode);
   }, [darkMode]);
 
-  // Annuler toute synthèse vocale en cours quand l'audio est désactivé
+  // Mettre à jour l'état d'activation audio du gestionnaire de parole
   useEffect(() => {
-    if (!audioEnabled) {
-      window.speechSynthesis.cancel();
-    }
+    speechManagerRef.current.setEnabled(audioEnabled);
   }, [audioEnabled]);
 
   // Charger le JSON puis le modèle
@@ -191,11 +271,7 @@ const Analyse = () => {
         setLoadingModel(false);
         
         // Message de bienvenue
-        if (audioEnabled) {
-          window.speechSynthesis.cancel(); // Annuler tout message en cours
-          const speech = new SpeechSynthesisUtterance("Système d'analyse d'objets prêt à l'emploi");
-          window.speechSynthesis.speak(speech);
-        }
+        speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi", 3);
       } catch (error) {
         console.error("Erreur lors du chargement:", error);
         setErrorMessage(`Impossible de charger les données ou les modèles d'IA. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
@@ -207,10 +283,103 @@ const Analyse = () => {
     
     return () => {
       // Nettoyage à la fermeture
-      window.speechSynthesis.cancel();
+      speechManagerRef.current.cancel();
       console.log("Nettoyage des ressources...");
     };
-  }, [detectionMode, audioEnabled]);
+  }, [detectionMode]);
+  
+  /**
+   * Génère une description de la scène à partir des objets détectés
+   */
+  const generateSceneDescription = useCallback((enhancedPredictions, newSceneDetected) => {
+    if (!audioEnabled || enhancedPredictions.length === 0) return;
+    
+    const now = Date.now();
+    // Limiter la fréquence des descriptions générales
+    const descriptionCooldown = 5000; // 5 secondes
+    
+    // Si pas assez de temps depuis la dernière description
+    if (now - lastDescriptionTimeRef.current < descriptionCooldown && !newSceneDetected) {
+      return;
+    }
+    
+    // Descriptions individuelles pour les objets significatifs (score élevé)
+    enhancedPredictions.forEach((prediction, index) => {
+      const objectId = `${prediction.class}-${index}`;
+      const objectHistory = objectHistoryRef.current[objectId] || { 
+        firstSeen: now, 
+        lastDescribed: 0,
+        detectionCount: 0,
+        confidence: [] 
+      };
+      
+      // Mettre à jour l'historique de l'objet
+      objectHistory.detectionCount++;
+      objectHistory.confidence.push(prediction.score);
+      if (objectHistory.confidence.length > 5) objectHistory.confidence.shift(); // Garder les 5 dernières valeurs
+      
+      // Calculer la confiance moyenne
+      const avgConfidence = objectHistory.confidence.reduce((a, b) => a + b, 0) / objectHistory.confidence.length;
+      const isNewObject = objectHistory.detectionCount <= 3;
+      const isStableObject = objectHistory.detectionCount > 5 && avgConfidence > 0.7;
+      const timeSinceLastDescription = now - objectHistory.lastDescribed;
+      
+      // Décider si on doit parler de cet objet
+      const shouldDescribe = 
+        (isNewObject && prediction.score > 0.7) || // Nouvel objet avec haute confiance
+        (isStableObject && timeSinceLastDescription > 10000) || // Objet stable mais pas décrit depuis longtemps
+        (newSceneDetected && index < 2 && prediction.score > 0.6); // Un des 2 principaux objets dans une nouvelle scène
+        
+      if (shouldDescribe) {
+        // Créer une description plus riche basée sur les infos disponibles
+        let description = `${prediction.class} détecté`;
+        
+        // Ajouter des détails sur la position/taille
+        const analysis = analyserDimensionsObjets(prediction, 640, 480); // Valeurs par défaut
+        description += `, ${analysis.distanceEstimee}`;
+        
+        // Ajouter des caractéristiques de l'objet si disponibles
+        if (prediction.caracteristiques && prediction.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
+          const shortDesc = prediction.caracteristiques.split('.')[0]; // Juste la première phrase
+          description += `. ${shortDesc}`;
+        }
+        
+        // Ajouter un conseil si disponible et pertinent
+        if (prediction.conseil && prediction.conseil !== "Aucun conseil disponible" && Math.random() > 0.7) {
+          description += `. ${prediction.conseil}`;
+        }
+        
+        // Parler avec une priorité basée sur la confiance et la nouveauté
+        const priority = isNewObject ? 2 : 1;
+        speechManagerRef.current.speak(description, priority, objectId);
+        
+        // Mettre à jour quand cet objet a été décrit pour la dernière fois
+        objectHistory.lastDescribed = now;
+      }
+      
+      // Sauvegarder l'historique mis à jour
+      objectHistoryRef.current[objectId] = objectHistory;
+    });
+    
+    // Génération de description globale de la scène si nécessaire
+    if (newSceneDetected && enhancedPredictions.length > 1) {
+      const topObjects = enhancedPredictions
+        .filter(p => p.score > 0.6)
+        .slice(0, 3)
+        .map(p => p.class);
+      
+      if (topObjects.length > 1) {
+        const sceneDesc = `Je vois ${topObjects.join(', ')}`;
+        
+        // Ne pas répéter la même description
+        if (sceneDesc !== lastSceneDescription) {
+          setLastSceneDescription(sceneDesc);
+          speechManagerRef.current.speak(sceneDesc, 1.5);
+          lastDescriptionTimeRef.current = now;
+        }
+      }
+    }
+  }, [audioEnabled]);
   
   /**
    * Fonction principale de détection d'objets et dessin
@@ -264,10 +433,19 @@ const Analyse = () => {
       // Vérifier si changement significatif
       const lastPredClasses = lastPredictionsRef.current
         .map(p => `${p.class}-${p.score.toFixed(2)}`)
+        .sort()
         .join(',');
+        
       const newPredClasses = enhancedPredictions
         .map(p => `${p.class}-${p.score.toFixed(2)}`)
+        .sort()
         .join(',');
+      
+      // Détecter si la scène a changé significativement
+      const isNewScene = lastPredClasses.split(',').length !== newPredClasses.split(',').length || 
+        (lastPredClasses.length > 0 && 
+         newPredClasses.length > 0 && 
+         !lastPredClasses.includes(newPredClasses.split(',')[0]));
       
       if (lastPredClasses !== newPredClasses) {
         // Mise à jour des états
@@ -287,17 +465,8 @@ const Analyse = () => {
         
         setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
         
-        // Notification vocale pour la détection principale
-        if (audioEnabled && enhancedPredictions.length > 0 && enhancedPredictions[0].score > 0.7) {
-          // Annuler toute synthèse en cours
-          window.speechSynthesis.cancel();
-          
-          const topPrediction = enhancedPredictions[0];
-          const speech = new SpeechSynthesisUtterance(
-            `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
-          );
-          window.speechSynthesis.speak(speech);
-        }
+        // Générer des descriptions audio des objets détectés
+        generateSceneDescription(enhancedPredictions, isNewScene);
       }
 
       // Nettoyer le canvas pour le nouveau rendu
@@ -382,7 +551,7 @@ const Analyse = () => {
 
     // Boucle de détection continue
     requestAnimationFrame(detectFrame);
-  }, [isDetecting, selectedObject, zoomLevel, brightness, audioEnabled, detectionInterval]);
+  }, [isDetecting, selectedObject, zoomLevel, brightness, detectionInterval, generateSceneDescription]);
 
   // Démarrer la détection une fois le modèle chargé
   useEffect(() => {
@@ -400,12 +569,7 @@ const Analyse = () => {
       if (imageSrc) {
         setCapturedImage(imageSrc);
         setIsDetecting(false);
-
-        if (audioEnabled) {
-          window.speechSynthesis.cancel();
-          const speech = new SpeechSynthesisUtterance("Photo capturée");
-          window.speechSynthesis.speak(speech);
-        }
+        speechManagerRef.current.speak("Photo capturée", 2);
       }
     }
   };
@@ -417,6 +581,8 @@ const Analyse = () => {
     if (!capturedImage || !modelRef.current?.cocoModel) return;
 
     try {
+      speechManagerRef.current.speak("Analyse de l'image en cours", 2);
+      
       const img = new Image();
       img.crossOrigin = "anonymous"; // Évite les erreurs CORS
       img.src = capturedImage;
@@ -460,9 +626,21 @@ const Analyse = () => {
           y > 20 ? y - 7 : y + height + 18
         );
       });
+      
+      // Résumé audio des objets détectés
+      if (enhancedPredictions.length > 0) {
+        const objectsText = enhancedPredictions.length === 1 
+          ? `1 objet détecté: ${enhancedPredictions[0].class}`
+          : `${enhancedPredictions.length} objets détectés: ${enhancedPredictions.slice(0, 3).map(p => p.class).join(', ')}`;
+          
+        speechManagerRef.current.speak(objectsText, 2);
+      } else {
+        speechManagerRef.current.speak("Aucun objet n'a été détecté dans cette image", 2);
+      }
     } catch (error) {
       console.error("Erreur lors de l'analyse de l'image:", error);
       setErrorMessage("Erreur lors de l'analyse de l'image");
+      speechManagerRef.current.speak("Erreur lors de l'analyse de l'image", 3);
     }
   };
 
@@ -472,13 +650,49 @@ const Analyse = () => {
   const resumeLiveDetection = () => {
     setCapturedImage(null);
     setIsDetecting(true);
+    speechManagerRef.current.speak("Retour au mode de détection en direct", 2);
   };
 
   /**
    * Change la caméra (avant/arrière sur mobile)
    */
   const switchCamera = () => {
-    setCameraFacingMode(prev => (prev === "user" ? "environment" : "user"));
+    const newMode = cameraFacingMode === "user" ? "environment" : "user";
+    setCameraFacingMode(newMode);
+    speechManagerRef.current.speak(`Caméra ${newMode === "user" ? "avant" : "arrière"} activée`, 2);
+  };
+  
+  /**
+   * Création d'une description détaillée d'un objet pour l'audio
+   */
+  const describeObjectVerbally = (object) => {
+    if (!audioEnabled || !object) return;
+    
+    // Construire une description complète basée sur toutes les informations disponibles
+    let description = `${object.class} détecté avec ${Math.round(object.score * 100)}% de certitude. `;
+    
+    // Ajouter des informations sur les caractéristiques si disponibles
+    if (object.caracteristiques && object.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
+      description += `${object.caracteristiques} `;
+    }
+    
+    // Ajouter l'utilisation si disponible
+    if (object.utilisation && object.utilisation !== "Utilisation non spécifiée.") {
+      description += `Utilisation: ${object.utilisation} `;
+    }
+    
+    // Ajouter l'analyse dimensionnelle
+    if (object.analyseComplete) {
+      const analyse = object.analyseComplete;
+      description += `Cet objet semble être ${analyse.distanceEstimee} et occupe environ ${analyse.proportionImage.surface} de l'image. `;
+    }
+    
+    // Ajouter un conseil pratique à la fin si disponible
+    if (object.conseil && object.conseil !== "Aucun conseil disponible.") {
+      description += `Conseil: ${object.conseil}`;
+    }
+    
+    speechManagerRef.current.speak(description, 3);
   };
 
   return (
@@ -492,7 +706,7 @@ const Analyse = () => {
           exit={{ opacity: 0 }}
           aria-live="polite"
         >
-          <div className="loader" aria-hidden="true"></div>
+                   <div className="loader" aria-hidden="true"></div>
           <h2>Chargement des modèles d'IA...</h2>
           <p>Préparation des réseaux de neurones et bases de connaissances</p>
         </motion.div>
@@ -545,6 +759,10 @@ const Analyse = () => {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="object-detail-title"
+                onAnimationComplete={() => {
+                  // Décrire verbalement l'objet une fois que l'animation est terminée
+                  describeObjectVerbally(selectedObject);
+                }}
               >
                 <div className="object-detail-card">
                   <div className="object-header">
@@ -740,11 +958,7 @@ const Analyse = () => {
                   document.body.appendChild(link);
                   link.click();
                   document.body.removeChild(link);
-                  if (audioEnabled) {
-                    window.speechSynthesis.cancel();
-                    const speech = new SpeechSynthesisUtterance("Image sauvegardée dans votre galerie");
-                    window.speechSynthesis.speak(speech);
-                  }
+                  speechManagerRef.current.speak("Image sauvegardée dans votre galerie", 2);
                 }}
                 className="control-button"
                 aria-label="Sauvegarder l'image"
@@ -768,7 +982,14 @@ const Analyse = () => {
                   <motion.li
                     key={`${item.class}-${index}`}
                     className={`detected-item ${isSelected ? "selected" : ""}`}
-                    onClick={() => setSelectedObject(isSelected ? null : item)}
+                    onClick={() => {
+                      // Lors de la sélection d'un objet, annuler toute synthèse vocale en cours
+                      // pour prioriser la description de l'objet sélectionné
+                      if (!isSelected) {
+                        speechManagerRef.current.cancel();
+                      }
+                      setSelectedObject(isSelected ? null : item);
+                    }}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0 }}
@@ -779,6 +1000,9 @@ const Analyse = () => {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
+                        if (!isSelected) {
+                          speechManagerRef.current.cancel();
+                        }
                         setSelectedObject(isSelected ? null : item);
                       }
                     }}
@@ -812,8 +1036,14 @@ const Analyse = () => {
               <input
                 type="checkbox"
                 checked={audioEnabled}
-                onChange={() => setAudioEnabled(!audioEnabled)}
-              /> Commentaires audio activés
+                onChange={() => {
+                  const newState = !audioEnabled;
+                  setAudioEnabled(newState);
+                  if (newState) {
+                    speechManagerRef.current.speak("Commentaires audio activés", 2);
+                  }
+                }}
+              /> {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />} Commentaires audio activés
             </label>
           </div>
           <div className="setting-item">
