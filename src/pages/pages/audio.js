@@ -60,7 +60,6 @@ const enrichPredictions = (predictions) => {
     return {
       ...prediction,
       ...baseInfo,
-      id: `${prediction.class}_${Math.random().toString(36).substr(2, 9)}`, // ID unique pour chaque objet
       detectedAt: new Date().toISOString(),
       certainty: prediction.score > 0.8 ? "Élevée" : prediction.score > 0.6 ? "Moyenne" : "Faible",
       dimensions: {
@@ -114,34 +113,6 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
 };
 
 /**
- * Crée un message audio descriptif d'un objet détecté
- * @param {Object} object - Objet détecté enrichi
- * @returns {string} - Texte descriptif à prononcer
- */
-const createAudioDescription = (object) => {
-  const confiance = Math.round(object.score * 100);
-  let description = `${object.class} détecté avec ${confiance}% de confiance. `;
-  
-  if (object.analyseComplete) {
-    const { distanceEstimee } = object.analyseComplete;
-    description += `Situé à ${distanceEstimee}. `;
-  }
-  
-  // Ajouter des informations spécifiques selon le niveau de confiance
-  if (object.score > 0.8) {
-    if (object.caracteristiques && object.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
-      description += `${object.caracteristiques.split('.')[0]}. `;
-    }
-    
-    if (object.utilisation && object.utilisation !== "Utilisation non spécifiée.") {
-      description += `Utilisé pour ${object.utilisation.split('.')[0].toLowerCase()}. `;
-    }
-  }
-  
-  return description;
-};
-
-/**
  * Composant principal d'analyse d'objets en temps réel
  */
 const Analyse = () => {
@@ -149,8 +120,7 @@ const Analyse = () => {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const modelRef = useRef(null);
-  const speechQueueRef = useRef([]);
-  const isSpeakingRef = useRef(false);
+  const speechSynthesisRef = useRef(null);
 
   // États
   const [predictions, setPredictions] = useState([]);
@@ -168,7 +138,6 @@ const Analyse = () => {
   const [darkMode, setDarkMode] = useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
   const [objectAnalyses, setObjectAnalyses] = useState({});
-  const [detectedObjectsHistory, setDetectedObjectsHistory] = useState({}); // Pour suivre les objets déjà détectés
 
   // Références pour optimisation
   const lastPredictionsRef = useRef([]);
@@ -184,61 +153,6 @@ const Analyse = () => {
   useEffect(() => {
     if (!audioEnabled) {
       window.speechSynthesis.cancel();
-      speechQueueRef.current = [];
-      isSpeakingRef.current = false;
-    }
-  }, [audioEnabled]);
-  
-  /**
-   * Gestion de la file d'attente audio et lecture séquentielle
-   */
-  const processAudioQueue = useCallback(() => {
-    if (!audioEnabled || isSpeakingRef.current || speechQueueRef.current.length === 0) {
-      return;
-    }
-    
-    isSpeakingRef.current = true;
-    const nextText = speechQueueRef.current.shift();
-    
-    const utterance = new SpeechSynthesisUtterance(nextText);
-    utterance.rate = 1.1; // Légèrement plus rapide pour plus de fluidité
-    utterance.onend = () => {
-      isSpeakingRef.current = false;
-      // Poursuivre avec le prochain élément
-      setTimeout(processAudioQueue, 300);
-    };
-    utterance.onerror = () => {
-      console.error("Erreur lors de la synthèse vocale");
-      isSpeakingRef.current = false;
-      setTimeout(processAudioQueue, 300);
-    };
-    
-    window.speechSynthesis.speak(utterance);
-  }, [audioEnabled]);
-  
-  // Processeur de file d'attente audio
-  useEffect(() => {
-    const intervalId = setInterval(processAudioQueue, 500);
-    return () => clearInterval(intervalId);
-  }, [processAudioQueue]);
-
-  /**
-   * Ajouter un message à la file d'attente audio
-   */
-  const addToSpeechQueue = useCallback((text, priority = false) => {
-    if (!audioEnabled) return;
-    
-    // Si prioritaire, placer au début de la file, sinon à la fin
-    if (priority) {
-      speechQueueRef.current.unshift(text);
-      
-      // Si un message est en cours, l'interrompre pour le message prioritaire
-      if (isSpeakingRef.current) {
-        window.speechSynthesis.cancel();
-        isSpeakingRef.current = false;
-      }
-    } else {
-      speechQueueRef.current.push(text);
     }
   }, [audioEnabled]);
 
@@ -277,7 +191,11 @@ const Analyse = () => {
         setLoadingModel(false);
         
         // Message de bienvenue
-        addToSpeechQueue("Système d'analyse d'objets prêt à l'emploi", true);
+        if (audioEnabled) {
+          window.speechSynthesis.cancel(); // Annuler tout message en cours
+          const speech = new SpeechSynthesisUtterance("Système d'analyse d'objets prêt à l'emploi");
+          window.speechSynthesis.speak(speech);
+        }
       } catch (error) {
         console.error("Erreur lors du chargement:", error);
         setErrorMessage(`Impossible de charger les données ou les modèles d'IA. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
@@ -292,7 +210,7 @@ const Analyse = () => {
       window.speechSynthesis.cancel();
       console.log("Nettoyage des ressources...");
     };
-  }, [detectionMode, addToSpeechQueue]);
+  }, [detectionMode, audioEnabled]);
   
   /**
    * Fonction principale de détection d'objets et dessin
@@ -356,55 +274,30 @@ const Analyse = () => {
         setPredictions(enhancedPredictions);
         lastPredictionsRef.current = enhancedPredictions;
         
-        // Analyser les dimensions des objets et mettre à jour la liste des objets détectés
+        // Analyser les dimensions des objets
         const newAnalyses = {};
-        const currentTime = Date.now();
-        const newDetectedObjects = {...detectedObjectsHistory};
-        
-        // Préparer des descriptions audio pour les nouveaux objets
         enhancedPredictions.forEach(pred => {
-          // Créer un ID unique pour cet objet
-          const objectId = pred.id;
-          
-          // Analyser les dimensions
-          const analyseDimensions = analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight);
-          
-          // Mettre à jour l'objet avec l'analyse complète
-          const enhancedObject = {
+          const objectId = `${pred.class}-${Math.random().toString(36).substring(2, 7)}`;
+          newAnalyses[objectId] = {
             ...pred,
-            analyseComplete: analyseDimensions,
+            analyseComplete: analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight),
             horodatage: new Date().toISOString()
           };
-          
-          newAnalyses[objectId] = enhancedObject;
-          
-          // Vérifier si cet objet est nouveau ou a changé significativement
-          const objKey = `${pred.class}`;
-          const existingObj = newDetectedObjects[objKey];
-          
-          if (!existingObj || 
-              (currentTime - existingObj.lastSpoken > 5000) || // Ne pas répéter avant 5 secondes
-              (Math.abs(pred.score - existingObj.score) > 0.15)) { // Changement significatif de confiance
-            
-            // Générer description audio pour ce nouvel objet ou changement significatif
-            const audioDescription = createAudioDescription(enhancedObject);
-            
-            // Mettre à jour l'historique de détection
-            newDetectedObjects[objKey] = {
-              ...pred,
-              lastSpoken: currentTime,
-              score: pred.score
-            };
-            
-            // Ajouter à la file d'attente audio avec priorité selon la confiance
-            const isPriority = pred.score > 0.85;
-            addToSpeechQueue(audioDescription, isPriority);
-          }
         });
         
-        // Mettre à jour l'état des objets détectés
         setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
-        setDetectedObjectsHistory(newDetectedObjects);
+        
+        // Notification vocale pour la détection principale
+        if (audioEnabled && enhancedPredictions.length > 0 && enhancedPredictions[0].score > 0.7) {
+          // Annuler toute synthèse en cours
+          window.speechSynthesis.cancel();
+          
+          const topPrediction = enhancedPredictions[0];
+          const speech = new SpeechSynthesisUtterance(
+            `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
+          );
+          window.speechSynthesis.speak(speech);
+        }
       }
 
       // Nettoyer le canvas pour le nouveau rendu
@@ -414,6 +307,7 @@ const Analyse = () => {
       if (brightness !== 100 || zoomLevel !== 1) {
         ctx.filter = `brightness(${brightness}%)`;
         ctx.save();
+
         if (zoomLevel !== 1) {
           ctx.translate(canvas.width / 2, canvas.height / 2);
           ctx.scale(zoomLevel, zoomLevel);
@@ -488,7 +382,7 @@ const Analyse = () => {
 
     // Boucle de détection continue
     requestAnimationFrame(detectFrame);
-  }, [isDetecting, selectedObject, zoomLevel, brightness, audioEnabled, detectionInterval, addToSpeechQueue, detectedObjectsHistory]);
+  }, [isDetecting, selectedObject, zoomLevel, brightness, audioEnabled, detectionInterval]);
 
   // Démarrer la détection une fois le modèle chargé
   useEffect(() => {
@@ -506,7 +400,12 @@ const Analyse = () => {
       if (imageSrc) {
         setCapturedImage(imageSrc);
         setIsDetecting(false);
-        addToSpeechQueue("Photo capturée", true);
+
+        if (audioEnabled) {
+          window.speechSynthesis.cancel();
+          const speech = new SpeechSynthesisUtterance("Photo capturée");
+          window.speechSynthesis.speak(speech);
+        }
       }
     }
   };
@@ -530,20 +429,6 @@ const Analyse = () => {
       const enhancedPredictions = enrichPredictions(rawPredictions.filter(p => p.score > 0.5));
 
       setPredictions(enhancedPredictions);
-      
-      // Message audio pour résumer l'analyse
-      if (enhancedPredictions.length > 0) {
-        const summary = `Analyse terminée. ${enhancedPredictions.length} objets détectés: ${
-          enhancedPredictions
-            .map(p => p.class)
-            .slice(0, 3) // Limiter pour ne pas être trop verbeux
-            .join(', ')
-        }${enhancedPredictions.length > 3 ? ', et d\'autres.' : '.'}`;
-        
-        addToSpeechQueue(summary, true);
-      } else {
-        addToSpeechQueue("Aucun objet n'a été détecté dans cette image.", true);
-      }
 
       // Dessiner l'image et les détections sur le canvas
       const canvas = canvasRef.current;
@@ -578,7 +463,6 @@ const Analyse = () => {
     } catch (error) {
       console.error("Erreur lors de l'analyse de l'image:", error);
       setErrorMessage("Erreur lors de l'analyse de l'image");
-      addToSpeechQueue("Une erreur s'est produite lors de l'analyse de l'image", true);
     }
   };
 
@@ -588,34 +472,13 @@ const Analyse = () => {
   const resumeLiveDetection = () => {
     setCapturedImage(null);
     setIsDetecting(true);
-    addToSpeechQueue("Retour à la détection en direct", true);
   };
 
   /**
    * Change la caméra (avant/arrière sur mobile)
    */
   const switchCamera = () => {
-    setCameraFacingMode(prev => {
-      const newMode = prev === "user" ? "environment" : "user";
-      addToSpeechQueue(`Passage à la caméra ${newMode === "user" ? "frontale" : "arrière"}`, true);
-      return newMode;
-    });
-  };
-  
-  /**
-   * Lire la description détaillée d'un objet sélectionné
-   */
-  const speakObjectDetails = (object) => {
-    if (!audioEnabled || !object) return;
-    
-    const details = `
-      ${object.class} détecté avec ${Math.round(object.score * 100)}% de confiance.
-      ${object.caracteristiques}
-      ${object.utilisation !== "Utilisation non spécifiée." ? "Utilisation: " + object.utilisation : ""}
-      ${object.conseil !== "Aucun conseil disponible." ? "Conseil: " + object.conseil : ""}
-    `;
-    
-    addToSpeechQueue(details, true);
+    setCameraFacingMode(prev => (prev === "user" ? "environment" : "user"));
   };
 
   return (
@@ -688,15 +551,6 @@ const Analyse = () => {
                     <div className="object-title">
                       <span className="object-icon" aria-hidden="true">{selectedObject.icon}</span>
                       <h3 id="object-detail-title">{selectedObject.class}</h3>
-                      {audioEnabled && (
-                        <button 
-                          className="audio-btn"
-                          onClick={() => speakObjectDetails(selectedObject)}
-                          aria-label="Lire la description audio de cet objet"
-                        >
-                          <FaVolumeUp />
-                        </button>
-                      )}
                     </div>
                     <button 
                       className="close-btn" 
@@ -719,7 +573,7 @@ const Analyse = () => {
                           className="progress"
                           style={{
                             width: `${selectedObject.score * 100}%`,
-                                                       backgroundColor:
+                            backgroundColor:
                               selectedObject.score > 0.7
                                 ? '#4CAF50'
                                 : selectedObject.score > 0.5
@@ -886,7 +740,11 @@ const Analyse = () => {
                   document.body.appendChild(link);
                   link.click();
                   document.body.removeChild(link);
-                  addToSpeechQueue("Image sauvegardée dans votre galerie", true);
+                  if (audioEnabled) {
+                    window.speechSynthesis.cancel();
+                    const speech = new SpeechSynthesisUtterance("Image sauvegardée dans votre galerie");
+                    window.speechSynthesis.speak(speech);
+                  }
                 }}
                 className="control-button"
                 aria-label="Sauvegarder l'image"
@@ -910,13 +768,7 @@ const Analyse = () => {
                   <motion.li
                     key={`${item.class}-${index}`}
                     className={`detected-item ${isSelected ? "selected" : ""}`}
-                    onClick={() => {
-                      setSelectedObject(isSelected ? null : item);
-                      if (!isSelected && audioEnabled) {
-                        // Annoncer la sélection
-                        addToSpeechQueue(`${item.class} sélectionné`, true);
-                      }
-                    }}
+                    onClick={() => setSelectedObject(isSelected ? null : item)}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0 }}
@@ -936,18 +788,6 @@ const Analyse = () => {
                       <strong>{item.class}</strong>
                       <span>{(item.score * 100).toFixed(1)}%</span>
                     </div>
-                    {audioEnabled && (
-                      <button 
-                        className="item-audio-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          addToSpeechQueue(createAudioDescription(item), true);
-                        }}
-                        aria-label={`Lire la description de ${item.class}`}
-                      >
-                        <FaVolumeUp />
-                      </button>
-                    )}
                   </motion.li>
                 );
               })}
@@ -1044,23 +884,6 @@ const Analyse = () => {
                     /> {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />} Commentaires vocaux
                   </label>
                 </div>
-                
-                {/* Nouveau: contrôle de la file d'attente audio */}
-                {audioEnabled && (
-                  <div className="setting-item">
-                    <button 
-                      className="control-button"
-                      onClick={() => {
-                        window.speechSynthesis.cancel();
-                        speechQueueRef.current = [];
-                        isSpeakingRef.current = false;
-                        addToSpeechQueue("File d'attente audio effacée", true);
-                      }}
-                    >
-                      <FaVolumeMute /> Effacer file d'attente audio
-                    </button>
-                  </div>
-                )}
               </motion.div>
             )}
           </AnimatePresence>

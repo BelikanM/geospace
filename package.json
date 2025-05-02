@@ -37,6 +37,7 @@
     "leaflet-routing-machine": "^3.2.12",
     "mapbox-gl": "^3.11.0",
     "onnxruntime-web": "^1.21.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.1.0",
     "react-bootstrap": "^2.10.9",
     "react-chartjs-2": "^5.3.0",
@@ -68,6 +69,7 @@
     "tesseract.js": "^6.0.1",
     "three": "^0.175.0",
     "web-vitals": "^4.2.4",
+    "webxr-polyfill": "^2.0.3",
     "wouter": "^3.6.0",
     "xlsx": "^0.18.5"
   },
