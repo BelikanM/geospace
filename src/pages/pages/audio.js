@@ -4,12 +4,12 @@ import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaCloudUploadAlt, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
-import { BsFillLightningFill, BsFillLightningChargeFill, BsZoomIn, BsZoomOut } from 'react-icons/bs';
-import { MdPhotoLibrary, MdFlashOff } from 'react-icons/md';
+import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
+import { BsZoomIn, BsZoomOut } from 'react-icons/bs';
+import { MdPhotoLibrary } from 'react-icons/md';
 import './Analyse.css';
 
-// Modèle pré-entraîné enrichi
+// Base de données des objets enrichie
 const objetInfos = {
   person: {
     icon: '👤',
@@ -205,17 +205,22 @@ const objetInfos = {
   }
 };
 
-// Fonction pour charger un modèle personnalisé en complément de coco-ssd
+/**
+ * Simule le chargement d'un modèle d'IA personnalisé en complément de COCO-SSD
+ * @returns {Promise<boolean>} État du chargement du modèle
+ */
 const loadCustomModel = async () => {
-  // Simulation de chargement d'un modèle personnalisé
-  // Dans une version réelle, vous chargeriez votre propre modèle TensorFlow.js ici
   console.log("Chargement du modèle personnalisé...");
-  await new Promise(resolve => setTimeout(resolve, 1000)); // Simulation
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Simulation de chargement
   console.log("Modèle personnalisé chargé");
   return true;
 };
 
-// Fonction pour enrichir les prédictions avec notre base de connaissances
+/**
+ * Enrichit les prédictions de l'IA avec des informations supplémentaires
+ * @param {Array} predictions - Prédictions brutes du modèle COCO-SSD
+ * @returns {Array} - Prédictions enrichies avec données additionnelles
+ */
 const enrichPredictions = (predictions) => {
   return predictions.map(prediction => {
     const baseInfo = objetInfos[prediction.class] || {
@@ -231,14 +236,12 @@ const enrichPredictions = (predictions) => {
       textePotentiel: "Texte inconnu"
     };
     
-    // Calcul de l'estimation des dimensions réelles basées sur la taille du box
     const [x, y, width, height] = prediction.bbox;
     const aspectRatio = width / height;
     
     // Estimation de la taille réelle (approximative)
     let tailleEstimee = null;
     if (baseInfo.dimensionsMoyennes) {
-      // Tentative d'estimation des dimensions réelles basée sur les connaissances de l'objet
       tailleEstimee = {
         ...baseInfo.dimensionsMoyennes,
         ratioImage: aspectRatio.toFixed(2),
@@ -264,17 +267,21 @@ const enrichPredictions = (predictions) => {
   });
 };
 
-// Fonction pour analyser l'image et estimer les dimensions des objets
+/**
+ * Analyse les dimensions et positions des objets détectés dans l'image
+ * @param {Object} prediction - Prédiction enrichie
+ * @param {number} videoWidth - Largeur de la vidéo
+ * @param {number} videoHeight - Hauteur de la vidéo
+ * @returns {Object} - Analyse dimensionnelle complète de l'objet
+ */
 const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
   const [x, y, width, height] = prediction.bbox;
   
-  // Calculer la proportion de l'objet dans l'image
   const proportionLargeur = width / videoWidth;
   const proportionHauteur = height / videoHeight;
   const proportionSurface = (width * height) / (videoWidth * videoHeight);
   
-  // Estimer la distance de l'objet (très approximatif)
-  // Plus l'objet occupe une grande partie de l'image, plus il est probablement proche
+  // Estimation de distance basée sur la taille relative
   let distanceEstimee = "indéterminée";
   if (proportionSurface > 0.5) distanceEstimee = "très proche";
   else if (proportionSurface > 0.25) distanceEstimee = "proche";
@@ -282,7 +289,6 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
   else if (proportionSurface > 0.05) distanceEstimee = "éloigné";
   else distanceEstimee = "très éloigné";
   
-  // Estimation du rapport taille réelle / taille perçue
   return {
     proportionImage: {
       largeur: `${(proportionLargeur * 100).toFixed(1)}%`,
@@ -299,12 +305,17 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
   };
 };
 
+/**
+ * Composant principal d'analyse d'objets en temps réel
+ */
 const Analyse = () => {
+  // Références
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const modelRef = useRef(null);
-  
-  // États de l'application
+  const speechSynthesisRef = useRef(null);
+
+  // États
   const [predictions, setPredictions] = useState([]);
   const [isDetecting, setIsDetecting] = useState(true);
   const [selectedObject, setSelectedObject] = useState(null);
@@ -314,37 +325,39 @@ const Analyse = () => {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [brightness, setBrightness] = useState(100);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [detectionMode, setDetectionMode] = useState("normal"); // normal, detail, fast
+  const [detectionMode, setDetectionMode] = useState("normal");
   const [loadingModel, setLoadingModel] = useState(true);
   const [errorMessage, setErrorMessage] = useState(null);
-  
-  // Theme et UI
   const [darkMode, setDarkMode] = useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
-  
-  // Options de confidentialité
   const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
-  
-  // Analyse des objets
   const [objectAnalyses, setObjectAnalyses] = useState({});
-  
+
   // Références pour optimisation
   const lastPredictionsRef = useRef([]);
   const lastDetectionTimeRef = useRef(0);
-  const detectionInterval = 200; // 5 FPS (200ms entre chaque détection)
+  const detectionInterval = detectionMode === "fast" ? 300 : detectionMode === "detail" ? 100 : 200; 
   
-  // Effet pour le mode sombre
+  // Appliquer le mode sombre
   useEffect(() => {
     document.body.classList.toggle('dark-mode', darkMode);
   }, [darkMode]);
 
-  // Chargement du modèle
+  // Annuler toute synthèse vocale en cours quand l'audio est désactivé
+  useEffect(() => {
+    if (!audioEnabled) {
+      window.speechSynthesis.cancel();
+    }
+  }, [audioEnabled]);
+
+  // Charger le modèle
   useEffect(() => {
     const loadModel = async () => {
       try {
         setLoadingModel(true);
         
-        // Assurer que TensorFlow.js utilise le backend WebGL pour des performances optimales
+        // Assurer que TensorFlow.js utilise WebGL
         await tf.setBackend('webgl');
+        console.log("Backend TensorFlow.js:", tf.getBackend());
         
         // Charger modèle COCO-SSD
         console.log("Chargement du modèle COCO-SSD...");
@@ -352,9 +365,10 @@ const Analyse = () => {
           base: detectionMode === "fast" ? "lite_mobilenet_v2" : "mobilenet_v2"
         });
         
-        // Charger notre modèle personnalisé en complément si nécessaire
+        // Charger le modèle personnalisé
         const customModelLoaded = await loadCustomModel();
         
+        // Stocker les références
         modelRef.current = {
           cocoModel,
           customModelLoaded,
@@ -363,43 +377,44 @@ const Analyse = () => {
         
         setLoadingModel(false);
         
-        // Effectuer la synthèse vocale de bienvenue si l'audio est activé
+        // Message de bienvenue
         if (audioEnabled) {
+          window.speechSynthesis.cancel(); // Annuler tout message en cours
           const speech = new SpeechSynthesisUtterance("Système d'analyse d'objets prêt à l'emploi");
           window.speechSynthesis.speak(speech);
         }
       } catch (error) {
         console.error("Erreur lors du chargement des modèles:", error);
-        setErrorMessage("Impossible de charger les modèles d'IA. Veuillez vérifier votre connexion internet et recharger la page.");
+        setErrorMessage(`Impossible de charger les modèles d'IA. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
         setLoadingModel(false);
       }
     };
     
     loadModel();
     
-    // Nettoyage à la fermeture
     return () => {
-      if (modelRef.current) {
-        console.log("Nettoyage des modèles...");
-        // Ici, vous pourriez libérer les ressources si nécessaire
-      }
+      // Nettoyage à la fermeture
+      window.speechSynthesis.cancel();
+      console.log("Nettoyage des ressources...");
     };
   }, [detectionMode, audioEnabled]);
   
-  // Fonction de détection en boucle avec mémorisation pour optimisation
+  /**
+   * Fonction principale de détection d'objets et dessin
+   */
   const detectFrame = useCallback(async () => {
+    // Vérification des prérequis
     if (
       !isDetecting || 
       !modelRef.current?.cocoModel || 
-      !webcamRef.current || 
-      !webcamRef.current.video || 
+      !webcamRef.current?.video || 
       webcamRef.current.video.readyState !== 4
     ) {
       requestAnimationFrame(detectFrame);
       return;
     }
 
-    // Limiter la fréquence de détection pour économiser les ressources
+    // Limiter la fréquence de détection
     const now = performance.now();
     if (now - lastDetectionTimeRef.current < detectionInterval) {
       requestAnimationFrame(detectFrame);
@@ -410,36 +425,46 @@ const Analyse = () => {
     try {
       const video = webcamRef.current.video;
       const canvas = canvasRef.current;
+      
+      if (!canvas) {
+        requestAnimationFrame(detectFrame);
+        return;
+      }
+      
       const ctx = canvas.getContext('2d');
 
-      // Ajustement du canvas aux dimensions de la vidéo
+      // Ajuster le canvas aux dimensions de la vidéo
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
-      // Détection avec le modèle principal
-      const rawPredictions = await modelRef.current.cocoModel.detect(video, 10); // Réduit à 10 objets max
+      // Détection des objets
+      const rawPredictions = await modelRef.current.cocoModel.detect(video, 10);
       
-      // Filtrer les prédictions avec un score minimum
+      // Filtrer par seuil de confiance et trier
       const filteredPredictions = rawPredictions
-        .filter(prediction => prediction.score > 0.35) // Seuil de confiance minimum
-        .sort((a, b) => b.score - a.score); // Trier par score décroissant
+        .filter(prediction => prediction.score > 0.35)
+        .sort((a, b) => b.score - a.score);
         
-      // Enrichir les prédictions avec notre base de connaissances
+      // Enrichir les prédictions
       const enhancedPredictions = enrichPredictions(filteredPredictions);
       
-      // Vérifier si les prédictions ont changé avant de mettre à jour l'état
-      const lastPredClasses = lastPredictionsRef.current.map(p => p.class + p.score.toFixed(2)).join(',');
-      const newPredClasses = enhancedPredictions.map(p => p.class + p.score.toFixed(2)).join(',');
+      // Vérifier si changement significatif
+      const lastPredClasses = lastPredictionsRef.current
+        .map(p => `${p.class}-${p.score.toFixed(2)}`)
+        .join(',');
+      const newPredClasses = enhancedPredictions
+        .map(p => `${p.class}-${p.score.toFixed(2)}`)
+        .join(',');
       
       if (lastPredClasses !== newPredClasses) {
-        // Mise à jour des prédictions seulement si changement
+        // Mise à jour des états
         setPredictions(enhancedPredictions);
         lastPredictionsRef.current = enhancedPredictions;
         
-        // Analyser les dimensions des objets détectés
+        // Analyser les dimensions des objets
         const newAnalyses = {};
         enhancedPredictions.forEach(pred => {
-          const objectId = `${pred.class}-${Math.random().toString(36).substr(2, 5)}`;
+          const objectId = `${pred.class}-${Math.random().toString(36).substring(2, 7)}`;
           newAnalyses[objectId] = {
             ...pred,
             analyseComplete: analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight),
@@ -449,8 +474,11 @@ const Analyse = () => {
         
         setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
         
-        // Notification vocale si activée
+        // Notification vocale pour la détection principale
         if (audioEnabled && enhancedPredictions.length > 0 && enhancedPredictions[0].score > 0.7) {
+          // Annuler toute synthèse en cours
+          window.speechSynthesis.cancel();
+          
           const topPrediction = enhancedPredictions[0];
           const speech = new SpeechSynthesisUtterance(
             `Détecté: ${topPrediction.class} avec ${Math.round(topPrediction.score * 100)}% de confiance`
@@ -459,35 +487,38 @@ const Analyse = () => {
         }
       }
 
-      // Nettoyer canevas
+      // Nettoyer le canvas pour le nouveau rendu
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // Appliquer les réglages (luminosité, zoom) seulement si nécessaire
+      // Appliquer les filtres visuels si nécessaire
       if (brightness !== 100 || zoomLevel !== 1) {
         ctx.filter = `brightness(${brightness}%)`;
         ctx.save();
+        
         if (zoomLevel !== 1) {
           ctx.translate(canvas.width / 2, canvas.height / 2);
           ctx.scale(zoomLevel, zoomLevel);
           ctx.translate(-canvas.width / 2, -canvas.height / 2);
         }
         
-        // Dessiner la vidéo seulement si on applique des filtres
+        // Dessiner la vidéo avec filtres
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.restore();
         ctx.filter = 'none';
       }
-           // Dessiner les rectangles de détection
+      
+      // Dessiner les rectangles et étiquettes des objets détectés
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
         const isSelected = selectedObject && selectedObject.class === prediction.class;
 
-        // Style rectangle
+        // Style du rectangle
         ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
         ctx.lineWidth = isSelected ? 4 : 2;
         ctx.lineJoin = 'round';
 
-        if (ctx.roundRect) {
+        // Dessiner le rectangle (avec arrondis si disponible)
+        if (typeof ctx.roundRect === 'function') {
           ctx.beginPath();
           ctx.roundRect(x, y, width, height, 5);
           ctx.stroke();
@@ -495,15 +526,16 @@ const Analyse = () => {
           ctx.strokeRect(x, y, width, height);
         }
 
-        // Créer une info-bulle avec fond semi-transparent
+               // Créer étiquette avec info-bulle pour chaque objet détecté
         const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
         const textWidth = ctx.measureText(text).width + 20;
         const bubbleHeight = 30;
 
         ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
 
+        // Créer bulle d'arrière-plan pour le texte
         ctx.beginPath();
-        if (ctx.roundRect) {
+        if (typeof ctx.roundRect === 'function') {
           ctx.roundRect(
             x - 5,
             y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
@@ -521,7 +553,7 @@ const Analyse = () => {
         }
         ctx.fill();
 
-        // Texte de l'étiquette
+        // Ajouter le texte de l'étiquette
         ctx.fillStyle = '#FFFFFF';
         ctx.font = 'bold 16px Arial';
         ctx.fillText(
@@ -530,59 +562,62 @@ const Analyse = () => {
           y > bubbleHeight + 10 ? y - bubbleHeight / 2 - 5 : y + height + bubbleHeight / 2 + 5
         );
       });
+      
     } catch (error) {
       console.error("Erreur pendant la détection:", error);
     }
 
-    // Prochaine frame de détection
+    // Boucle de détection continue
     requestAnimationFrame(detectFrame);
-  }, [
-    isDetecting,
-    selectedObject,
-    zoomLevel,
-    brightness,
-    audioEnabled,
-    detectionMode
-  ]);
+  }, [isDetecting, selectedObject, zoomLevel, brightness, audioEnabled, detectionInterval]);
 
-  // Démarrer la détection en boucle
+  // Démarrer la détection une fois le modèle chargé
   useEffect(() => {
     if (!loadingModel) {
       detectFrame();
     }
   }, [detectFrame, loadingModel]);
 
-  // Fonction pour capturer une photo
+  /**
+   * Capture une photo depuis le flux webcam
+   */
   const capturePhoto = () => {
     if (webcamRef.current) {
       const imageSrc = webcamRef.current.getScreenshot();
-      setCapturedImage(imageSrc);
-      setIsDetecting(false);
+      if (imageSrc) {
+        setCapturedImage(imageSrc);
+        setIsDetecting(false);
 
-      if (audioEnabled) {
-        const speech = new SpeechSynthesisUtterance("Photo capturée");
-        window.speechSynthesis.speak(speech);
+        if (audioEnabled) {
+          window.speechSynthesis.cancel();
+          const speech = new SpeechSynthesisUtterance("Photo capturée");
+          window.speechSynthesis.speak(speech);
+        }
       }
     }
   };
 
-  // Analyser la photo chargée (comme pour une image capturée)
+  /**
+   * Analyse une image capturée ou chargée
+   */
   const analyzeImage = async () => {
     if (!capturedImage || !modelRef.current?.cocoModel) return;
 
     try {
       const img = new Image();
-      img.crossOrigin = "anonymous"; // Pour éviter les erreurs CORS si nécessaire
+      img.crossOrigin = "anonymous"; // Évite les erreurs CORS
       img.src = capturedImage;
 
+      // Attendre que l'image soit chargée
       await new Promise(resolve => { img.onload = resolve; });
 
+      // Analyser l'image avec le modèle
       const rawPredictions = await modelRef.current.cocoModel.detect(img, 10);
       const enhancedPredictions = enrichPredictions(rawPredictions.filter(p => p.score > 0.5));
 
       setPredictions(enhancedPredictions);
 
-      // Dessiner sur le canvas
+      // Dessiner l'image et les détections sur le canvas
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
 
@@ -592,13 +627,13 @@ const Analyse = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
 
+      // Dessiner les rectangles de détection sur l'image
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
 
         ctx.strokeStyle = '#00FFFF';
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
-
         ctx.strokeRect(x, y, width, height);
 
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -612,55 +647,62 @@ const Analyse = () => {
           y > 20 ? y - 7 : y + height + 18
         );
       });
-    } catch (e) {
-      console.error("Erreur lors de l'analyse de l'image:", e);
+    } catch (error) {
+      console.error("Erreur lors de l'analyse de l'image:", error);
+      setErrorMessage("Erreur lors de l'analyse de l'image");
     }
   };
 
-  // Retour caméra live
+  /**
+   * Retour au mode de détection en direct
+   */
   const resumeLiveDetection = () => {
     setCapturedImage(null);
     setIsDetecting(true);
   };
 
-  // Changer caméra (avant/arrière)
+  /**
+   * Change la caméra (avant/arrière sur mobile)
+   */
   const switchCamera = () => {
     setCameraFacingMode(prev => (prev === "user" ? "environment" : "user"));
   };
 
   return (
     <div className={`analyse-container ${darkMode ? 'dark-mode' : 'light-mode'}`}>
-      {/* Loading overlay */}
+      {/* Overlay de chargement */}
       {loadingModel && (
         <motion.div
           className="loading-overlay"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          aria-live="polite"
         >
-          <div className="loader"></div>
+          <div className="loader" aria-hidden="true"></div>
           <h2>Chargement des modèles d'IA...</h2>
           <p>Préparation des réseaux de neurones et bases de connaissances</p>
         </motion.div>
       )}
 
-      {/* Error message */}
+      {/* Message d'erreur */}
       {errorMessage && (
         <motion.div
           className="error-message"
           initial={{ opacity: 0, y: -50 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -50 }}
+          role="alert"
         >
-          <FaInfoCircle size={24} />
+          <FaInfoCircle size={24} aria-hidden="true" />
           <p>{errorMessage}</p>
-          <button onClick={() => setErrorMessage(null)}>Fermer</button>
+          <button onClick={() => setErrorMessage(null)} aria-label="Fermer le message d'erreur">Fermer</button>
         </motion.div>
       )}
 
       <div className="main-content">
         <div className="camera-container">
-          <div className="camera-view">
+          <div className="camera-view" aria-live="polite" aria-label="Flux vidéo avec détection d'objets">
             {!capturedImage ? (
               <>
                 <Webcam
@@ -675,32 +717,45 @@ const Analyse = () => {
               </>
             ) : (
               <div className="captured-image-container">
-                <img src={capturedImage} alt="Captured" className="captured-image" />
+                <img src={capturedImage} alt="Image capturée" className="captured-image" />
                 <canvas ref={canvasRef} className="detection-canvas" />
               </div>
             )}
 
-            {/* Overlay infos objet sélectionné */}
+            {/* Overlay de détail pour l'objet sélectionné */}
             {selectedObject && (
               <motion.div
                 className="object-detail-overlay"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 20 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="object-detail-title"
               >
                 <div className="object-detail-card">
                   <div className="object-header">
                     <div className="object-title">
-                      <span className="object-icon">{selectedObject.icon}</span>
-                      <h3>{selectedObject.class}</h3>
+                      <span className="object-icon" aria-hidden="true">{selectedObject.icon}</span>
+                      <h3 id="object-detail-title">{selectedObject.class}</h3>
                     </div>
-                    <span className="close-btn" onClick={() => setSelectedObject(null)}>×</span>
+                    <button 
+                      className="close-btn" 
+                      onClick={() => setSelectedObject(null)}
+                      aria-label="Fermer les détails"
+                    >×</button>
                   </div>
 
                   <div className="object-body">
-                    <div className="confidence-meter">
+                    <div className="confidence-meter" 
+                      aria-label={`Niveau de confiance: ${(selectedObject.score * 100).toFixed(1)}%`}
+                    >
                       <span>Confiance: {(selectedObject.score * 100).toFixed(1)}%</span>
-                      <div className="progress-bar">
+                      <div className="progress-bar" role="progressbar" 
+                        aria-valuenow={(selectedObject.score * 100).toFixed(1)}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      >
                         <div
                           className="progress"
                           style={{
@@ -784,13 +839,14 @@ const Analyse = () => {
             )}
           </div>
 
-          {/* Toolbar caméra */}
-          <div className="camera-toolbar">
+          {/* Barre d'outils de caméra */}
+          <div className="camera-toolbar" role="toolbar" aria-label="Contrôles de caméra">
             <motion.button
               whileTap={{ scale: 0.9 }}
               className="tool-button"
               onClick={switchCamera}
               title="Changer de caméra"
+              aria-label="Changer entre caméra avant et arrière"
             >
               <FaExchangeAlt />
             </motion.button>
@@ -801,6 +857,7 @@ const Analyse = () => {
               onClick={() => setZoomLevel(prev => Math.max(1, prev - 0.1))}
               disabled={zoomLevel <= 1}
               title="Zoom arrière"
+              aria-label="Zoom arrière"
             >
               <BsZoomOut />
             </motion.button>
@@ -810,6 +867,7 @@ const Analyse = () => {
               className={`tool-button ${!capturedImage ? "primary" : ""}`}
               onClick={capturedImage ? analyzeImage : capturePhoto}
               title={capturedImage ? "Analyser l'image" : "Prendre une photo"}
+              aria-label={capturedImage ? "Analyser l'image" : "Prendre une photo"}
             >
               <FaCamera />
             </motion.button>
@@ -820,18 +878,19 @@ const Analyse = () => {
               onClick={() => setZoomLevel(prev => Math.min(3, prev + 0.1))}
               disabled={zoomLevel >= 3}
               title="Zoom avant"
+              aria-label="Zoom avant"
             >
               <BsZoomIn />
             </motion.button>
 
-            <label className="tool-button" title="Charger une image">
+            <label className="tool-button" title="Charger une image" aria-label="Charger une image">
               <MdPhotoLibrary />
               <input
                 type="file"
                 accept="image/*"
                 style={{ display: 'none' }}
                 onChange={e => {
-                  const file = e.target.files[0];
+                  const file = e.target.files?.[0];
                   if (file) {
                     const reader = new FileReader();
                     reader.onloadend = () => {
@@ -846,13 +905,14 @@ const Analyse = () => {
             </label>
           </div>
 
-          {/* Contrôles image capturée */}
+          {/* Contrôles pour l'image capturée */}
           {capturedImage && (
             <div className="capture-controls">
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={resumeLiveDetection}
                 className="control-button"
+                aria-label="Retour à la caméra en direct"
               >
                 Retour à la caméra
               </motion.button>
@@ -868,11 +928,13 @@ const Analyse = () => {
                   link.click();
                   document.body.removeChild(link);
                   if (audioEnabled) {
+                    window.speechSynthesis.cancel();
                     const speech = new SpeechSynthesisUtterance("Image sauvegardée dans votre galerie");
                     window.speechSynthesis.speak(speech);
                   }
                 }}
                 className="control-button"
+                aria-label="Sauvegarder l'image"
               >
                 <FaSave /> Sauvegarder l'image
               </motion.button>
@@ -880,32 +942,42 @@ const Analyse = () => {
           )}
         </div>
 
-        {/* Liste objets détectés et analyses */}
+        {/* Liste des objets détectés */}
         <div className="detected-list-container">
           <h2>Objets détectés</h2>
           {predictions.length === 0 && !loadingModel && <p>En attente de détection...</p>}
 
-          <ul className="detected-list">
+          <ul className="detected-list" role="listbox" aria-label="Liste des objets détectés">
             <AnimatePresence>
-              {predictions.map((item, index) => (
-                <motion.li
-                  key={`${item.class}-${index}`}
-                  className={`detected-item ${selectedObject?.class === item.class ? "selected" : ""}`}
-                  onClick={() => {
-                    setSelectedObject(selectedObject?.class === item.class ? null : item);
-                  }}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0 }}
-                  whileHover={{ scale: 1.05, backgroundColor: '#222' }}
-                >
-                  <span className="item-icon">{item.icon}</span>
-                  <div className="item-text">
-                    <strong>{item.class}</strong>
-                    <span>{(item.score * 100).toFixed(1)}%</span>
-                  </div>
-                </motion.li>
-              ))}
+              {predictions.map((item, index) => {
+                const isSelected = selectedObject?.class === item.class;
+                return (
+                  <motion.li
+                    key={`${item.class}-${index}`}
+                    className={`detected-item ${isSelected ? "selected" : ""}`}
+                    onClick={() => setSelectedObject(isSelected ? null : item)}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0 }}
+                    whileHover={{ scale: 1.05, backgroundColor: '#222' }}
+                    role="option"
+                    aria-selected={isSelected}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedObject(isSelected ? null : item);
+                      }
+                    }}
+                  >
+                    <span className="item-icon" aria-hidden="true">{item.icon}</span>
+                    <div className="item-text">
+                      <strong>{item.class}</strong>
+                      <span>{(item.score * 100).toFixed(1)}%</span>
+                    </div>
+                  </motion.li>
+                );
+              })}
             </AnimatePresence>
           </ul>
         </div>
@@ -953,6 +1025,9 @@ const Analyse = () => {
                 max="150"
                 value={brightness}
                 onChange={(e) => setBrightness(Number(e.target.value))}
+                aria-valuemin="50"
+                aria-valuemax="150"
+                aria-valuenow={brightness}
               />&nbsp;{brightness}%
             </label>
           </div>
@@ -960,6 +1035,8 @@ const Analyse = () => {
             className="settings-toggle-btn"
             onClick={() => setShowSettings(!showSettings)}
             whileTap={{ scale: 0.9 }}
+            aria-expanded={showSettings}
+            aria-controls="advanced-settings"
           >
             <FaCog /> {showSettings ? "Cacher" : "Afficher"} paramètres avancés
           </motion.button>
@@ -968,6 +1045,7 @@ const Analyse = () => {
           <AnimatePresence>
             {showSettings && (
               <motion.div
+                id="advanced-settings"
                 className="settings-advanced"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -979,9 +1057,19 @@ const Analyse = () => {
                       type="checkbox"
                       checked={enableCloudAnalysis}
                       onChange={() => setEnableCloudAnalysis(!enableCloudAnalysis)}
+                      disabled
                     /> Analyse dans le cloud (bientôt disponible)
                   </label>
-                  <small className="coming-soon">⚠️</small>
+                  <small className="coming-soon" aria-label="Fonctionnalité à venir">⚠️</small>
+                </div>
+                <div className="setting-item">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={audioEnabled}
+                      onChange={() => setAudioEnabled(!audioEnabled)}
+                    /> {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />} Commentaires vocaux
+                  </label>
                 </div>
               </motion.div>
             )}
