@@ -1,146 +1,37 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaVolumeUp, FaVolumeMute, FaArrowLeft } from 'react-icons/fa';
-import { BsZoomIn, BsZoomOut, BsFullscreen } from 'react-icons/bs';
-import { MdPhotoLibrary, MdFiberManualRecord } from 'react-icons/md';
+import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
+import { BsZoomIn, BsZoomOut } from 'react-icons/bs';
+import { MdPhotoLibrary } from 'react-icons/md';
 import './Analyse.css';
 
 // On initialise avec un objet vide qui sera remplacé par les données du fichier JSON
 let objetInfos = {};
 
 /**
- * Gestion intelligente des commentaires vocaux avec file d'attente
+ * Simule le chargement d'un modèle d'IA personnalisé en complément de COCO-SSD
+ * @returns {Promise<boolean>} État du chargement du modèle
  */
-class SpeechManager {
-  constructor() {
-    this.queue = [];
-    this.speaking = false;
-    this.lastMessages = {};
-    this.cooldowns = {};
-    this.enabled = true;
-    this.lastDetections = new Map(); // Pour suivre les objets détectés entre les frames
-    this.stabilityThreshold = 3; // Nombre de détections consécutives avant de parler
-  }
-
-  setEnabled(enabled) {
-    this.enabled = enabled;
-    if (!enabled) {
-      this.cancel();
-    }
-  }
-
-  cancel() {
-    window.speechSynthesis.cancel();
-    this.queue = [];
-    this.speaking = false;
-  }
-
-  // Utiliser cette méthode pour ajouter un message à la file d'attente
-  speak(text, priority = 1, objectId = null) {
-    if (!this.enabled) return;
-    
-    // Éviter les messages répétés trop fréquemment pour le même objet
-    if (objectId) {
-      const now = Date.now();
-      const lastSpoken = this.lastMessages[objectId] || 0;
-      const cooldown = this.cooldowns[objectId] || 2000; // 2 secondes par défaut
-      
-      if (now - lastSpoken < cooldown) {
-        return; // Ignore ce message, trop récent pour cet objet
-      }
-      
-      this.lastMessages[objectId] = now;
-      
-      // Augmenter progressivement le cooldown pour éviter trop de mises à jour
-      this.cooldowns[objectId] = Math.min(8000, cooldown + 500);
-    }
-
-    const message = { text, priority, timestamp: Date.now() };
-    
-    // Ajouter le message à la file dans l'ordre de priorité
-    const insertIndex = this.queue.findIndex(item => item.priority < priority);
-    if (insertIndex === -1) {
-      this.queue.push(message);
-    } else {
-      this.queue.splice(insertIndex, 0, message);
-    }
-    
-    this.processQueue();
-  }
-
-  // Traite la file de messages
-  processQueue() {
-    if (this.speaking || this.queue.length === 0) return;
-    
-    const message = this.queue.shift();
-    this.speaking = true;
-    
-    const utterance = new SpeechSynthesisUtterance(message.text);
-    utterance.lang = 'fr-FR';
-    utterance.rate = 1.1; // Légèrement plus rapide pour une expérience plus fluide
-    
-    utterance.onend = () => {
-      this.speaking = false;
-      // Attendre un court instant avant de traiter le message suivant
-      setTimeout(() => this.processQueue(), 300);
-    };
-    
-    window.speechSynthesis.speak(utterance);
-  }
-
-  // Méthode pour suivre la stabilité des objets entre les frames
-  trackDetection(objectId, prediction) {
-    const now = Date.now();
-    let track = this.lastDetections.get(objectId) || {
-      firstSeen: now,
-      detectionCount: 0,
-      lastSeen: 0,
-      confidence: [],
-      isStable: false,
-      wasDescribed: false
-    };
-
-    // Mettre à jour les stats de l'objet
-    track.detectionCount++;
-    track.lastSeen = now;
-    track.confidence.push(prediction.score);
-    
-    // Garder seulement les dernières valeurs pour éviter une consommation mémoire trop importante
-    if (track.confidence.length > 10) track.confidence.shift();
-
-    // Déterminer si l'objet est stable (détecté plusieurs fois consécutivement)
-    track.isStable = track.detectionCount >= this.stabilityThreshold;
-
-    this.lastDetections.set(objectId, track);
-    return track;
-  }
-
-  // Nettoyer les objets qui n'ont pas été vus depuis un certain temps
-  cleanupDetections() {
-    const now = Date.now();
-    const timeout = 5000; // 5 secondes
-    
-    for (const [objectId, track] of this.lastDetections.entries()) {
-      if (now - track.lastSeen > timeout) {
-        this.lastDetections.delete(objectId);
-      }
-    }
-  }
-}
+const loadCustomModel = async () => {
+  console.log("Chargement du modèle personnalisé...");
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Simulation de chargement
+  console.log("Modèle personnalisé chargé");
+  return true;
+};
 
 /**
  * Enrichit les prédictions de l'IA avec des informations supplémentaires
- * @param {Array} predictions - Prédictions brutes des modèles
+ * @param {Array} predictions - Prédictions brutes du modèle COCO-SSD
  * @returns {Array} - Prédictions enrichies avec données additionnelles
  */
 const enrichPredictions = (predictions) => {
   return predictions.map(prediction => {
-    // Informations de base par défaut
     const baseInfo = objetInfos[prediction.class] || {
-      icon: '🔧', // Icône pour les détections YOLO
+      icon: prediction.class.includes('custom-') ? '🔧' : '❓',
       caracteristiques: "Informations non disponibles dans notre base de connaissances.",
       utilisation: "Utilisation non spécifiée.",
       categories: ["non classifié"],
@@ -149,8 +40,7 @@ const enrichPredictions = (predictions) => {
       conseil: "Aucun conseil disponible.",
       dimensionsMoyennes: { notes: "Dimensions inconnues" },
       poidsEstime: "Inconnu",
-      textePotentiel: "Texte inconnu",
-      source: "YOLO" // Toujours YOLO puisque c'est le seul modèle utilisé
+      textePotentiel: "Texte inconnu"
     };
     
     const [x, y, width, height] = prediction.bbox;
@@ -218,17 +108,88 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
       rapport: (width / height).toFixed(2)
     },
     distanceEstimee,
-    dimensionsEstimees: prediction.dimensionsMoyennes || "Données non disponibles",
-    position: {
-      centre: {
-        x: Math.round(x + width/2),
-        y: Math.round(y + height/2),
-      },
-      relativePosition: x < videoWidth/3 ? "gauche" : 
-                        x > videoWidth*2/3 ? "droite" : "centre"
-    }
+    dimensionsEstimees: prediction.dimensionsMoyennes || "Données non disponibles"
   };
 };
+
+/**
+ * Gestion intelligente des commentaires vocaux
+ */
+class SpeechManager {
+  constructor() {
+    this.queue = [];
+    this.speaking = false;
+    this.lastMessages = {};
+    this.cooldowns = {};
+    this.enabled = true;
+  }
+
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.cancel();
+    }
+  }
+
+  cancel() {
+    window.speechSynthesis.cancel();
+    this.queue = [];
+    this.speaking = false;
+  }
+
+  // Utiliser cette méthode pour ajouter un message à la file d'attente
+  speak(text, priority = 1, objectId = null) {
+    if (!this.enabled) return;
+    
+    // Éviter les messages répétés trop fréquemment pour le même objet
+    if (objectId) {
+      const now = Date.now();
+      const lastSpoken = this.lastMessages[objectId] || 0;
+      const cooldown = this.cooldowns[objectId] || 2000; // 2 secondes par défaut
+      
+      if (now - lastSpoken < cooldown) {
+        return; // Ignore ce message, trop récent pour cet objet
+      }
+      
+      this.lastMessages[objectId] = now;
+      
+      // Augmenter progressivement le cooldown pour éviter trop de mises à jour
+      this.cooldowns[objectId] = Math.min(5000, cooldown + 500);
+    }
+
+    const message = { text, priority, timestamp: Date.now() };
+    
+    // Ajouter le message à la file dans l'ordre de priorité
+    const insertIndex = this.queue.findIndex(item => item.priority < priority);
+    if (insertIndex === -1) {
+      this.queue.push(message);
+    } else {
+      this.queue.splice(insertIndex, 0, message);
+    }
+    
+    this.processQueue();
+  }
+
+  // Traite la file de messages
+  processQueue() {
+    if (this.speaking || this.queue.length === 0) return;
+    
+    const message = this.queue.shift();
+    this.speaking = true;
+    
+    const utterance = new SpeechSynthesisUtterance(message.text);
+    utterance.lang = 'fr-FR';
+    utterance.rate = 1.1; // Légèrement plus rapide pour une expérience plus fluide
+    
+    utterance.onend = () => {
+      this.speaking = false;
+      // Attendre un court instant avant de traiter le message suivant
+      setTimeout(() => this.processQueue(), 300);
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  }
+}
 
 /**
  * Composant principal d'analyse d'objets en temps réel
@@ -239,7 +200,6 @@ const Analyse = () => {
   const canvasRef = useRef(null);
   const modelRef = useRef(null);
   const speechManagerRef = useRef(new SpeechManager());
-  const containerRef = useRef(null);
 
   // États
   const [predictions, setPredictions] = useState([]);
@@ -255,67 +215,16 @@ const Analyse = () => {
   const [loadingModel, setLoadingModel] = useState(true);
   const [errorMessage, setErrorMessage] = useState(null);
   const [darkMode, setDarkMode] = useState(window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showControls, setShowControls] = useState(true);
+  const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
   const [objectAnalyses, setObjectAnalyses] = useState({});
   const [lastSceneDescription, setLastSceneDescription] = useState("");
-  const [detectionStats, setDetectionStats] = useState({
-    yoloDetections: 0,
-    lastUpdate: Date.now()
-  });
 
   // Références pour optimisation
   const lastPredictionsRef = useRef([]);
   const objectHistoryRef = useRef({}); // Pour suivre l'historique de chaque objet détecté
   const lastDetectionTimeRef = useRef(0);
-  const detectionInterval = detectionMode === "fast" ? 150 : detectionMode === "detail" ? 60 : 100;
+  const detectionInterval = detectionMode === "fast" ? 300 : detectionMode === "detail" ? 100 : 200;
   const lastDescriptionTimeRef = useRef(0);
-  
-  // Fonction pour passer en plein écran et sortir du plein écran
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      if (containerRef.current.requestFullscreen) {
-        containerRef.current.requestFullscreen();
-        setIsFullscreen(true);
-      }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-        setIsFullscreen(false);
-      }
-    }
-  };
-
-  // Surveillance des changements de plein écran
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-  
-  // Afficher/masquer les contrôles sur le touch
-  useEffect(() => {
-    let timeout;
-    const handleInteraction = () => {
-      setShowControls(true);
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        if (!showSettings && isFullscreen) {
-          setShowControls(false);
-        }
-      }, 3000);
-    };
-
-    document.addEventListener('mousemove', handleInteraction);
-    document.addEventListener('touchstart', handleInteraction);
-    return () => {
-      document.removeEventListener('mousemove', handleInteraction);
-      document.removeEventListener('touchstart', handleInteraction);
-      clearTimeout(timeout);
-    };
-  }, [showSettings, isFullscreen]);
   
   // Appliquer le mode sombre
   useEffect(() => {
@@ -327,7 +236,7 @@ const Analyse = () => {
     speechManagerRef.current.setEnabled(audioEnabled);
   }, [audioEnabled]);
 
-  // Charger le JSON puis les modèles (uniquement YOLO)
+  // Charger le JSON puis le modèle - CORRIGÉ pour éviter la redéclaration de cocoModel
   useEffect(() => {
     const loadModelsAndData = async () => {
       try {
@@ -343,24 +252,42 @@ const Analyse = () => {
         await tf.setBackend('webgl');
         console.log("Backend TensorFlow.js:", tf.getBackend());
         
-        // CHARGEMENT UNIQUEMENT DU MODÈLE YOLO
-        console.log("Chargement du modèle YOLO personnalisé...");
-        const yoloModel = await tf.loadGraphModel('/models/lifemodo_tfjs/model.json');
-        console.log("Modèle YOLO chargé avec succès ✅");
+        // SECTION CORRIGÉE: Chargement des modèles sans redéclaration
+        // Charger COCO-SSD et YOLO en une seule fois
+        console.log("Chargement des modèles d'IA...");
+        
+        // Chargement du modèle COCO-SSD
+        const cocoSsdModel = await cocoSsd.load({
+          base: detectionMode === "fast" ? "lite_mobilenet_v2" : "mobilenet_v2"
+        });
+        console.log("Modèle COCO-SSD chargé");
 
-        // Stocker uniquement le modèle YOLO
+        // Chargement du modèle YOLO
+        let yoloModel = null;
+        try {
+          console.log("Chargement du modèle YOLO personnalisé...");
+          yoloModel = await tf.loadGraphModel('/models/lifemodo_tfjs/model.json');
+          console.log("Modèle YOLO chargé avec succès");
+        } catch (yoloError) {
+          console.error("Erreur lors du chargement du modèle YOLO:", yoloError);
+          // Continuer même si YOLO échoue
+        }
+
+        // Stocker les modèles dans la référence
         modelRef.current = {
+          cocoModel: cocoSsdModel,  // Remarquez le nom différent pour éviter la redéclaration
           yoloModel,
+          customModelLoaded: !!yoloModel,
           createdAt: new Date()
         };
         
         setLoadingModel(false);
         
         // Message de bienvenue
-        speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi. Modèle YOLO activé.", 3);
+        speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi", 3);
       } catch (error) {
         console.error("Erreur lors du chargement:", error);
-        setErrorMessage(`Impossible de charger les données ou le modèle YOLO. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
+        setErrorMessage(`Impossible de charger les données ou les modèles d'IA. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
         setLoadingModel(false);
       }
     };
@@ -384,95 +311,75 @@ const Analyse = () => {
     // Limiter la fréquence des descriptions générales
     const descriptionCooldown = 5000; // 5 secondes
     
-    // Nettoyer les détections obsolètes
-    speechManagerRef.current.cleanupDetections();
+    // Si pas assez de temps depuis la dernière description
+    if (now - lastDescriptionTimeRef.current < descriptionCooldown && !newSceneDetected) {
+      return;
+    }
     
-    // Trier les prédictions par score
-    const sortedPredictions = [...enhancedPredictions].sort((a, b) => b.score - a.score);
-    
-    // Descriptions individuelles pour les objets significatifs
-    sortedPredictions.forEach((prediction, index) => {
-      // Identifier l'objet par sa classe et sa position (pour différencier multiples instances)
-      const [x, y, width, height] = prediction.bbox;
-      const objectId = `${prediction.class}-${Math.round(x)}-${Math.round(y)}`;
+    // Descriptions individuelles pour les objets significatifs (score élevé)
+    enhancedPredictions.forEach((prediction, index) => {
+      const objectId = `${prediction.class}-${index}`;
+      const objectHistory = objectHistoryRef.current[objectId] || { 
+        firstSeen: now, 
+        lastDescribed: 0,
+        detectionCount: 0,
+        confidence: [] 
+      };
       
-      // Suivre la détection pour évaluer sa stabilité
-      const track = speechManagerRef.current.trackDetection(objectId, prediction);
+      // Mettre à jour l'historique de l'objet
+      objectHistory.detectionCount++;
+      objectHistory.confidence.push(prediction.score);
+      if (objectHistory.confidence.length > 5) objectHistory.confidence.shift(); // Garder les 5 dernières valeurs
       
-      // Conditions pour décrire un objet
-      const isStableObject = track.isStable;
-      const isNewStableObject = isStableObject && !track.wasDescribed;
-      const isHighConfidence = prediction.score > 0.7;
-      const timeSinceLastDescription = now - (track.lastDescribed || 0);
-      const isTimeToBriefly = timeSinceLastDescription > 20000; // 20 secondes
-      const isPrioritizedPosition = index < 3; // Parmi les 3 objets principaux
+      // Calculer la confiance moyenne
+      const avgConfidence = objectHistory.confidence.reduce((a, b) => a + b, 0) / objectHistory.confidence.length;
+      const isNewObject = objectHistory.detectionCount <= 3;
+      const isStableObject = objectHistory.detectionCount > 5 && avgConfidence > 0.7;
+      const timeSinceLastDescription = now - objectHistory.lastDescribed;
       
       // Décider si on doit parler de cet objet
       const shouldDescribe = 
-        (isNewStableObject && isHighConfidence) || // Nouvel objet stable avec haute confiance
-        (isStableObject && isTimeToBriefly && isHighConfidence) || // Rappel périodique pour les objets importants
-        (newSceneDetected && isPrioritizedPosition && isHighConfidence); // Objets importants dans une nouvelle scène
+        (isNewObject && prediction.score > 0.7) || // Nouvel objet avec haute confiance
+        (isStableObject && timeSinceLastDescription > 10000) || // Objet stable mais pas décrit depuis longtemps
+        (newSceneDetected && index < 2 && prediction.score > 0.6); // Un des 2 principaux objets dans une nouvelle scène
         
       if (shouldDescribe) {
-        // Créer une description intelligente basée sur le contexte
-        let description = "";
+        // Créer une description plus riche basée sur les infos disponibles
+        let description = `${prediction.class} détecté`;
         
-        // Version détaillée pour les nouveaux objets, simplifiée pour les rappels
-        if (isNewStableObject) {
-          description = `Objet personnalisé ${prediction.class.replace('custom-', '')} détecté`;
-          
-          // Ajouter des détails sur la position/taille
-          const analysis = analyserDimensionsObjets(prediction, 640, 480);
-          const positionDesc = analysis.position.relativePosition === "gauche" ? "à gauche" : 
-                              analysis.position.relativePosition === "droite" ? "à droite" : "au centre";
-                              
-          description += `, ${positionDesc}, ${analysis.distanceEstimee}`;
-          
-          // Ajouter des caractéristiques de l'objet si disponibles et pertinentes
-          if (prediction.caracteristiques && 
-              prediction.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
-            // Extraire juste la première phrase pour être concis
-            const shortDesc = prediction.caracteristiques.split('.')[0]; 
-            description += `. ${shortDesc}`;
-          }
-          
-          // Ajouter un conseil si disponible et pertinent (pas à chaque fois)
-          if (prediction.conseil && 
-              prediction.conseil !== "Aucun conseil disponible" && 
-              Math.random() > 0.6) {
-            description += `. ${prediction.conseil}`;
-          }
-        } else if (isTimeToBriefly) {
-          // Version très courte pour les rappels périodiques
-          description = `Objet ${prediction.class.replace('custom-', '')} toujours visible`;
-          
-          // Mentionner sa position
-          const analysis = analyserDimensionsObjets(prediction, 640, 480);
-          const positionDesc = analysis.position.relativePosition === "gauche" ? "à gauche" : 
-                              analysis.position.relativePosition === "droite" ? "à droite" : "au centre";
-          description += `, ${positionDesc}`;
+        // Ajouter des détails sur la position/taille
+        const analysis = analyserDimensionsObjets(prediction, 640, 480); // Valeurs par défaut
+        description += `, ${analysis.distanceEstimee}`;
+        
+        // Ajouter des caractéristiques de l'objet si disponibles
+        if (prediction.caracteristiques && prediction.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
+          const shortDesc = prediction.caracteristiques.split('.')[0]; // Juste la première phrase
+          description += `. ${shortDesc}`;
         }
         
-        if (description) {
-          // Parler avec une priorité basée sur la nouveauté et confiance
-          const priority = isNewStableObject ? 2 : 
-                          isTimeToBriefly ? 1 : 1.5;
-                          
-          speechManagerRef.current.speak(description, priority, objectId);
-          
-          // Marquer que cet objet a été décrit
-          track.wasDescribed = true;
-          track.lastDescribed = now;
+        // Ajouter un conseil si disponible et pertinent
+        if (prediction.conseil && prediction.conseil !== "Aucun conseil disponible" && Math.random() > 0.7) {
+          description += `. ${prediction.conseil}`;
         }
+        
+        // Parler avec une priorité basée sur la confiance et la nouveauté
+        const priority = isNewObject ? 2 : 1;
+        speechManagerRef.current.speak(description, priority, objectId);
+        
+        // Mettre à jour quand cet objet a été décrit pour la dernière fois
+        objectHistory.lastDescribed = now;
       }
+      
+      // Sauvegarder l'historique mis à jour
+      objectHistoryRef.current[objectId] = objectHistory;
     });
     
     // Génération de description globale de la scène si nécessaire
-    if (newSceneDetected && sortedPredictions.length > 1 && now - lastDescriptionTimeRef.current > descriptionCooldown) {
-      const topObjects = sortedPredictions
+    if (newSceneDetected && enhancedPredictions.length > 1) {
+      const topObjects = enhancedPredictions
         .filter(p => p.score > 0.6)
         .slice(0, 3)
-        .map(p => p.class.replace('custom-', 'Objet '));
+        .map(p => p.class);
       
       if (topObjects.length > 1) {
         const sceneDesc = `Je vois ${topObjects.join(', ')}`;
@@ -480,31 +387,21 @@ const Analyse = () => {
         // Ne pas répéter la même description
         if (sceneDesc !== lastSceneDescription) {
           setLastSceneDescription(sceneDesc);
-          speechManagerRef.current.speak(sceneDesc, 1.8);
+          speechManagerRef.current.speak(sceneDesc, 1.5);
           lastDescriptionTimeRef.current = now;
         }
       }
     }
-    
-    // Mettre à jour les statistiques de détection pour l'affichage
-    const yoloCount = sortedPredictions.length;
-    
-    setDetectionStats(prev => ({
-      yoloDetections: yoloCount,
-      lastUpdate: now
-    }));
-    
   }, [audioEnabled]);
   
   /**
    * Fonction principale de détection d'objets et dessin
-   * Utilise uniquement YOLO
    */
   const detectFrame = useCallback(async () => {
     // Vérification des prérequis
     if (
       !isDetecting || 
-      !modelRef.current?.yoloModel || 
+      !modelRef.current?.cocoModel || 
       !webcamRef.current?.video || 
       webcamRef.current.video.readyState !== 4
     ) {
@@ -512,7 +409,7 @@ const Analyse = () => {
       return;
     }
 
-    // Limiter la fréquence de détection pour maintenir les performances
+    // Limiter la fréquence de détection
     const now = performance.now();
     if (now - lastDetectionTimeRef.current < detectionInterval) {
       requestAnimationFrame(detectFrame);
@@ -535,351 +432,390 @@ const Analyse = () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
-      // Préparer le tenseur d'entrée pour YOLO
-      const inputTensor = tf.browser.fromPixels(video)
-        .resizeNearestNeighbor([640, 640])
-        .expandDims()
-        .div(255.0);
+      // SECTION CORRIGÉE pour fusionner les prédictions COCO-SSD et YOLO sans erreurs
+      // Obtenir les prédictions COCO-SSD
+      const cocoPredictions = await modelRef.current.cocoModel.detect(video, 10);
+      
+      // Tableau pour stocker toutes les prédictions
+      let allPredictions = [...cocoPredictions];
+
+      // Ajouter les prédictions YOLO si le modèle est disponible
+      if (modelRef.current.yoloModel) {
+        try {
+          // Préparation de l'entrée pour YOLO
+          const inputTensor = tf.browser.fromPixels(video)
+            .resizeNearestNeighbor([640, 640])
+            .expandDims()
+            .div(255.0);
+
+          // Exécuter l'inférence YOLO
+          const yoloOutput = await modelRef.current.yoloModel.executeAsync(inputTensor);
           
-      // Exécuter l'inférence YOLO
-      const yoloOutputs = await modelRef.current.yoloModel.executeAsync(inputTensor);
-      
-      // Nettoyer le tenseur d'entrée pour éviter les fuites mémoire
-      inputTensor.dispose();
-      
-      // Récupérer les données du premier tenseur de sortie qui contient les prédictions
-      const yoloData = await yoloOutputs[0].array();
-      
-      // Nettoyer les tenseurs de sortie
-      if (Array.isArray(yoloOutputs)) {
-        yoloOutputs.forEach(tensor => tensor.dispose());
-      } else {
-        yoloOutputs.dispose();
-      }
-      
-      // Récupérer les prédictions brutes du modèle YOLO
-      const yoloRawPredictions = yoloData[0];
-      
-      // Tableau pour stocker les prédictions formatées
-      let yoloPredictions = [];
-      
-      // Analyser les prédictions YOLO et les convertir au format standard
-      for (let i = 0; i < yoloRawPredictions.length; i++) {
-        const [x, y, w, h, score, classId] = yoloRawPredictions[i];
-        
-        // Ne garder que les prédictions avec un score suffisant
-        if (score > 0.3) { // Seuil plus bas car c'est notre seul modèle
-          // Convertir en format compatible avec le reste du code
-          yoloPredictions.push({
-            bbox: [
-              (x - w/2) * video.videoWidth, // Coordonnée X du coin supérieur gauche
-              (y - h/2) * video.videoHeight, // Coordonnée Y du coin supérieur gauche
-              w * video.videoWidth,          // Largeur
-              h * video.videoHeight          // Hauteur
-            ],
-            class: `custom-${Math.round(classId)}`, // Nom de classe personnalisé
-            score,                                  // Score de confiance
-            source: "YOLO"                          // Source de la prédiction
-          });
+          // Nettoyer le tenseur d'entrée pour éviter les fuites mémoire
+          inputTensor.dispose();
+          
+          // Traiter la sortie du modèle YOLO
+          const yoloData = await yoloOutput[0].array();
+          
+          // S'assurer que yoloOutput est bien un tableau et dispose tous les tenseurs
+          if (Array.isArray(yoloOutput)) {
+            yoloOutput.forEach(tensor => tensor.dispose());
+          } else {
+            yoloOutput.dispose();
+          }
+          
+          // Récupérer les prédictions brutes
+          const yoloRawPredictions = yoloData[0];
+          
+          // Convertir les prédictions YOLO au format compatible
+          for (let i = 0; i < yoloRawPredictions.length; i++) {
+            const [x, y, w, h, score, classId] = yoloRawPredictions[i];
+            
+            // Ne garder que les prédictions avec un score suffisant
+            if (score > 0.5) {
+              // Convertir au format attendu par le reste du code
+              allPredictions.push({
+                bbox: [
+                  (x - w/2) * video.videoWidth, 
+                  (y - h/2) * video.videoHeight,
+                  w * video.videoWidth, 
+                  h * video.videoHeight
+                ],
+                class: `custom-${Math.round(classId)}`, 
+                score
+              });
+            }
+          }
+        } catch (yoloError) {
+          console.error("Erreur lors de l'inférence YOLO:", yoloError);
+          // Continuer avec seulement les prédictions COCO-SSD en cas d'erreur
         }
       }
       
-      // Trier les prédictions par score
-      const filteredPredictions = yoloPredictions
-        .filter(prediction => prediction.score > 0.3)
+      // Filtrer par seuil de confiance et trier
+      const filteredPredictions = allPredictions
+        .filter(prediction => prediction.score > 0.35)
         .sort((a, b) => b.score - a.score);
-
-      // Enrichir les prédictions avec des informations supplémentaires
+        
+      // Enrichir les prédictions
       const enhancedPredictions = enrichPredictions(filteredPredictions);
-
-      // Vérifier changement significatif pour mise à jour des états et audio
+      
+      // Vérifier si changement significatif
       const lastPredClasses = lastPredictionsRef.current
         .map(p => `${p.class}-${p.score.toFixed(2)}`)
         .sort()
         .join(',');
+        
       const newPredClasses = enhancedPredictions
         .map(p => `${p.class}-${p.score.toFixed(2)}`)
         .sort()
         .join(',');
-      const isNewScene = lastPredClasses !== newPredClasses;
       
-      if (isNewScene) {
-        // Maj état React
+      // Détecter si la scène a changé significativement
+      const isNewScene = lastPredClasses.split(',').length !== newPredClasses.split(',').length || 
+        (lastPredClasses.length > 0 && 
+         newPredClasses.length > 0 && 
+         !lastPredClasses.includes(newPredClasses.split(',')[0]));
+      
+      if (lastPredClasses !== newPredClasses) {
+        // Mise à jour des états
         setPredictions(enhancedPredictions);
         lastPredictionsRef.current = enhancedPredictions;
-
-        // Analyser dimensions objets détectés
+        
+        // Analyser les dimensions des objets
         const newAnalyses = {};
         enhancedPredictions.forEach(pred => {
-          const objectId = `${pred.class}-${Math.random().toString(36).slice(2, 8)}`;
+          const objectId = `${pred.class}-${Math.random().toString(36).substring(2, 7)}`;
           newAnalyses[objectId] = {
             ...pred,
             analyseComplete: analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight),
             horodatage: new Date().toISOString()
           };
         });
-        setObjectAnalyses(prev => ({ ...prev, ...newAnalyses }));
-
-        // Génération des descriptions audio intelligentes
+        
+        setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
+        
+        // Générer des descriptions audio des objets détectés
         generateSceneDescription(enhancedPredictions, isNewScene);
       }
 
-      // Dessiner sur le canvas
+      // Nettoyer le canvas pour le nouveau rendu
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Appliquer filtres visuels (luminosité, zoom)
+      
+      // Appliquer les filtres visuels si nécessaire
       if (brightness !== 100 || zoomLevel !== 1) {
         ctx.filter = `brightness(${brightness}%)`;
         ctx.save();
 
         if (zoomLevel !== 1) {
-          ctx.translate(canvas.width/2, canvas.height/2);
+          ctx.translate(canvas.width / 2, canvas.height / 2);
           ctx.scale(zoomLevel, zoomLevel);
-          ctx.translate(-canvas.width/2, -canvas.height/2);
+          ctx.translate(-canvas.width / 2, -canvas.height / 2);
         }
-
+        
+        // Dessiner la vidéo avec filtres
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.restore();
         ctx.filter = 'none';
-      } else {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       }
-
-      // Dessiner toutes les boîtes rectangulaires et annotations
+      
+      // Dessiner les rectangles et étiquettes des objets détectés
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
         const isSelected = selectedObject && selectedObject.class === prediction.class;
 
-        ctx.strokeStyle = isSelected ? '#FF3366' : '#FFAA00'; // Couleur orange pour YOLO
+        // Style du rectangle
+        ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
         ctx.lineWidth = isSelected ? 4 : 2;
         ctx.lineJoin = 'round';
 
-        // Arrondir les rectangles si possible
+        // Dessiner le rectangle (avec arrondis si disponible)
         if (typeof ctx.roundRect === 'function') {
           ctx.beginPath();
-          ctx.roundRect(x, y, width, height, 6);
+          ctx.roundRect(x, y, width, height, 5);
           ctx.stroke();
         } else {
           ctx.strokeRect(x, y, width, height);
         }
 
-        // Affichage des étiquettes
-        const label = `${prediction.icon} YOLO ${prediction.class.replace('custom-', '')} ${(prediction.score*100).toFixed(0)}%`;
-        const padding = 6;
-        const fontSize = 16;
-        ctx.font = `bold ${fontSize}px Arial`;
-        const textWidth = ctx.measureText(label).width;
+        // Créer étiquette avec info-bulle pour chaque objet détecté
+        const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
+        const textWidth = ctx.measureText(text).width + 20;
+        const bubbleHeight = 30;
 
-        // Background box étiquette
-        ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.85)' : 'rgba(0, 0, 0, 0.6)';
-        const rectX = x;
-        const rectY = y > fontSize + padding*2 ? y - fontSize - padding*1.5 : y + height + padding/2;
-        const rectWidth = textWidth + padding*2;
-        const rectHeight = fontSize + padding*1.5;
+        ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+
+        // Créer bulle d'arrière-plan pour le texte
+        ctx.beginPath();
         if (typeof ctx.roundRect === 'function') {
-          ctx.beginPath();
-          ctx.roundRect(rectX, rectY, rectWidth, rectHeight, 5);
-          ctx.fill();
+          ctx.roundRect(
+            x - 5,
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
+            textWidth,
+            bubbleHeight,
+            5
+          );
         } else {
-          ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+          ctx.fillRect(
+            x - 5,
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
+            textWidth,
+            bubbleHeight
+          );
         }
+        ctx.fill();
 
-        // Texte étiquette
+        // Ajouter le texte de l'étiquette
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillText(label, rectX + padding, rectY + fontSize);
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(
+          text,
+          x + 5,
+          y > bubbleHeight + 10 ? y - bubbleHeight / 2 - 5 : y + height + bubbleHeight / 2 + 5
+        );
       });
       
     } catch (error) {
-      console.error('Erreur pendant la détection:', error);
+      console.error("Erreur pendant la détection:", error);
     }
 
+    // Boucle de détection continue
     requestAnimationFrame(detectFrame);
-  }, [
-    isDetecting, selectedObject, zoomLevel, brightness,
-    detectionInterval, generateSceneDescription, audioEnabled
-  ]);
+  }, [isDetecting, selectedObject, zoomLevel, brightness, detectionInterval, generateSceneDescription]);
 
-  // Lancement de la détection après chargement des modèles
+  // Démarrer la détection une fois le modèle chargé
   useEffect(() => {
-       if (!loadingModel && webcamRef.current?.video?.readyState === 4) {
+    if (!loadingModel) {
       detectFrame();
     }
-  }, [loadingModel, detectFrame]);
+  }, [detectFrame, loadingModel]);
 
-  // Analyse d'une image capturée
-  const analyzeCapturedImage = async (imageSource) => {
-    if (!modelRef.current?.yoloModel) {
-      setErrorMessage("Le modèle YOLO n'est pas chargé");
-      return;
+  /**
+   * Capture une photo depuis le flux webcam
+   */
+  const capturePhoto = () => {
+    if (webcamRef.current) {
+      const imageSrc = webcamRef.current.getScreenshot();
+      if (imageSrc) {
+        setCapturedImage(imageSrc);
+        setIsDetecting(false);
+        speechManagerRef.current.speak("Photo capturée", 2);
+      }
     }
+  };
+
+  /**
+   * Analyse une image capturée ou chargée - CORRIGÉE pour éviter les redéclarations
+   */
+  const analyzeImage = async () => {
+    if (!capturedImage || !modelRef.current?.cocoModel) return;
 
     try {
-      // Créer une image à partir de la source
+      speechManagerRef.current.speak("Analyse de l'image en cours", 2);
+      
       const img = new Image();
-      img.src = imageSource;
+      img.crossOrigin = "anonymous"; // Évite les erreurs CORS
+      img.src = capturedImage;
+
+      // Attendre que l'image soit chargée
       await new Promise(resolve => { img.onload = resolve; });
 
-      // Préparer le canvas pour l'analyse
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
+      // Tableau pour stocker toutes les prédictions
+      let allPredictions = [];
 
-      // Préparer le tenseur d'entrée pour YOLO
-      const inputTensor = tf.browser.fromPixels(img)
-        .resizeNearestNeighbor([640, 640])
-        .expandDims()
-        .div(255.0);
+      // COCO-SSD predictions
+      const cocoPredictions = await modelRef.current.cocoModel.detect(img, 10);
+      allPredictions = [...cocoPredictions];
+      
+      // YOLO predictions si disponibles
+      if (modelRef.current.yoloModel) {
+        try {
+          const inputTensor = tf.browser.fromPixels(img)
+            .resizeNearestNeighbor([640, 640])
+            .expandDims()
+            .div(255.0);
 
-      // Exécuter l'inférence YOLO
-      const yoloOutputs = await modelRef.current.yoloModel.executeAsync(inputTensor);
-      inputTensor.dispose();
+          const yoloOutput = await modelRef.current.yoloModel.executeAsync(inputTensor);
+          
+          // Libérer la mémoire
+          inputTensor.dispose();
+          
+          const yoloData = await yoloOutput[0].array();
+          
+          // Libérer les tenseurs
+          if (Array.isArray(yoloOutput)) {
+            yoloOutput.forEach(tensor => tensor.dispose());
+          } else {
+            yoloOutput.dispose();
+          }
+          
+          const yoloRawPredictions = yoloData[0];
 
-      // Récupérer les données
-      const yoloData = await yoloOutputs[0].array();
-      if (Array.isArray(yoloOutputs)) {
-        yoloOutputs.forEach(tensor => tensor.dispose());
-      } else {
-        yoloOutputs.dispose();
-      }
-
-      // Traiter les prédictions
-      const yoloRawPredictions = yoloData[0];
-      let yoloPredictions = [];
-
-      for (let i = 0; i < yoloRawPredictions.length; i++) {
-        const [x, y, w, h, score, classId] = yoloRawPredictions[i];
-        if (score > 0.3) {
-          yoloPredictions.push({
-            bbox: [
-              (x - w/2) * img.width,
-              (y - h/2) * img.height,
-              w * img.width,
-              h * img.height
-            ],
-            class: `custom-${Math.round(classId)}`,
-            score,
-            source: "YOLO"
-          });
+          // Convertir les prédictions YOLO au format compatible
+          for (let i = 0; i < yoloRawPredictions.length; i++) {
+            const [x, y, w, h, score, classId] = yoloRawPredictions[i];
+            if (score > 0.5) {
+              allPredictions.push({
+                bbox: [
+                  (x - w/2) * img.width, 
+                  (y - h/2) * img.height,
+                  w * img.width, 
+                  h * img.height
+                ],
+                class: `custom-${Math.round(classId)}`, 
+                score
+              });
+            }
+          }
+        } catch (yoloError) {
+          console.error("Erreur lors de l'inférence YOLO sur image:", yoloError);
         }
       }
 
-      // Enrichir et mettre à jour l'état
-      const enhancedPredictions = enrichPredictions(yoloPredictions);
+      const enhancedPredictions = enrichPredictions(allPredictions.filter(p => p.score > 0.5));
       setPredictions(enhancedPredictions);
 
-      // Dessiner les résultats sur l'image
+      // Dessiner l'image et les détections sur le canvas
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+
+      // Dessiner les rectangles de détection sur l'image
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
-        
-        // Rectangle de détection
-        ctx.strokeStyle = '#FFAA00';
+
+        ctx.strokeStyle = '#00FFFF';
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
-        
-        if (typeof ctx.roundRect === 'function') {
-          ctx.beginPath();
-          ctx.roundRect(x, y, width, height, 6);
-          ctx.stroke();
-        } else {
-          ctx.strokeRect(x, y, width, height);
-        }
+        ctx.strokeRect(x, y, width, height);
 
-        // Étiquette
-        const label = `${prediction.icon} YOLO ${prediction.class.replace('custom-', '')} ${(prediction.score*100).toFixed(0)}%`;
-        const padding = 6;
-        const fontSize = 16;
-        ctx.font = `bold ${fontSize}px Arial`;
-        const textWidth = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(x, y > 20 ? y - 25 : y + height, width, 25);
 
-        // Fond de l'étiquette
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-        const rectX = x;
-        const rectY = y > fontSize + padding*2 ? y - fontSize - padding*1.5 : y + height + padding/2;
-        const rectWidth = textWidth + padding*2;
-        const rectHeight = fontSize + padding*1.5;
-        
-        if (typeof ctx.roundRect === 'function') {
-          ctx.beginPath();
-          ctx.roundRect(rectX, rectY, rectWidth, rectHeight, 5);
-          ctx.fill();
-        } else {
-          ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
-        }
-
-        // Texte de l'étiquette
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillText(label, rectX + padding, rectY + fontSize);
+        ctx.font = '16px Arial';
+        ctx.fillText(
+          `${prediction.class} ${(prediction.score * 100).toFixed(0)}%`,
+          x + 5,
+          y > 20 ? y - 7 : y + height + 18
+        );
       });
-
-      // Description audio des résultats
-      if (enhancedPredictions.length > 0 && audioEnabled) {
+      
+      // Résumé audio des objets détectés
+      if (enhancedPredictions.length > 0) {
         const objectsText = enhancedPredictions.length === 1 
-          ? `1 objet détecté: ${enhancedPredictions[0].class.replace('custom-', '')}`
-          : `${enhancedPredictions.length} objets détectés: ${enhancedPredictions.slice(0, 3).map(p => p.class.replace('custom-', '')).join(', ')}`;
+          ? `1 objet détecté: ${enhancedPredictions[0].class}`
+          : `${enhancedPredictions.length} objets détectés: ${enhancedPredictions.slice(0, 3).map(p => p.class).join(', ')}`;
           
         speechManagerRef.current.speak(objectsText, 2);
-      } else if (audioEnabled) {
+      } else {
         speechManagerRef.current.speak("Aucun objet n'a été détecté dans cette image", 2);
       }
-
     } catch (error) {
       console.error("Erreur lors de l'analyse de l'image:", error);
       setErrorMessage("Erreur lors de l'analyse de l'image");
+      speechManagerRef.current.speak("Erreur lors de l'analyse de l'image", 3);
     }
   };
 
-  // Commandes principales (zoom, capture, arrêt/démarrage détection, changement caméra)
-  const capturePhoto = () => {
-    if (!webcamRef.current) return;
-
-    const screenshot = webcamRef.current.getScreenshot();
-    if (screenshot) {
-      setCapturedImage(screenshot);
-      setIsDetecting(false);
-      speechManagerRef.current.speak('Photo capturée', 2);
-      setTimeout(() => analyzeCapturedImage(screenshot), 200);
-    }
-  };
-
+  /**
+   * Retour au mode de détection en direct
+   */
   const resumeLiveDetection = () => {
     setCapturedImage(null);
     setIsDetecting(true);
-    speechManagerRef.current.speak('Retour au mode détection en direct', 2);
+    speechManagerRef.current.speak("Retour au mode de détection en direct", 2);
   };
 
+  /**
+   * Change la caméra (avant/arrière sur mobile)
+   */
   const switchCamera = () => {
-    setCameraFacingMode(prev => (prev === 'user' ? 'environment' : 'user'));
-    speechManagerRef.current.speak(`Caméra ${cameraFacingMode === 'user' ? 'arrière' : 'avant'} activée`, 2);
+    const newMode = cameraFacingMode === "user" ? "environment" : "user";
+    setCameraFacingMode(newMode);
+    speechManagerRef.current.speak(`Caméra ${newMode === "user" ? "avant" : "arrière"} activée`, 2);
   };
-
-  // Description audio à la sélection d'un objet
-  const describeObjectVerbally = (obj) => {
-    if (!audioEnabled || !obj) return;
-    let description = `${obj.class.replace('custom-', 'Objet ')} détecté avec une confiance de ${Math.round(obj.score * 100)}%. `;
-    if (obj.caracteristiques && !obj.caracteristiques.includes('non disponible')){
-      description += obj.caracteristiques + " ";
+  
+  /**
+   * Création d'une description détaillée d'un objet pour l'audio
+   */
+  const describeObjectVerbally = (object) => {
+    if (!audioEnabled || !object) return;
+    
+    // Construire une description complète basée sur toutes les informations disponibles
+    let description = `${object.class} détecté avec ${Math.round(object.score * 100)}% de certitude. `;
+    
+    // Ajouter des informations sur les caractéristiques si disponibles
+    if (object.caracteristiques && object.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
+      description += `${object.caracteristiques} `;
     }
-    if (obj.utilisation && !obj.utilisation.includes('non spécifiée')){
-      description += `Utilisation : ${obj.utilisation}. `;
+    
+    // Ajouter l'utilisation si disponible
+    if (object.utilisation && object.utilisation !== "Utilisation non spécifiée.") {
+      description += `Utilisation: ${object.utilisation} `;
     }
-    if (obj.analyseComplete){
-      description += `Cet objet semble être ${obj.analyseComplete.distanceEstimee} dans le champ de vision. `;
+    
+    // Ajouter l'analyse dimensionnelle
+    if (object.analyseComplete) {
+      const analyse = object.analyseComplete;
+      description += `Cet objet semble être ${analyse.distanceEstimee} et occupe environ ${analyse.proportionImage.surface} de l'image. `;
     }
-    if (obj.conseil && !obj.conseil.includes('Aucun')){
-      description += `Conseil : ${obj.conseil}.`;
+    
+    // Ajouter un conseil pratique à la fin si disponible
+    if (object.conseil && object.conseil !== "Aucun conseil disponible.") {
+      description += `Conseil: ${object.conseil}`;
     }
+    
     speechManagerRef.current.speak(description, 3);
   };
 
   return (
-    <div
-      ref={containerRef}
-      className={`analyse-container ${darkMode ? 'dark-mode' : 'light-mode'} fullscreen`}
-      style={{ position: 'relative', height: '100vh', width: '100vw', overflow: 'hidden' }}
-      onClick={() => setShowSettings(false)}
-    >
+    <div className={`analyse-container ${darkMode ? 'dark-mode' : 'light-mode'}`}>
       {/* Overlay de chargement */}
       {loadingModel && (
         <motion.div
@@ -887,462 +823,271 @@ const Analyse = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            backgroundColor: darkMode ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.9)',
-            zIndex: 100,
-            color: darkMode ? 'white' : 'black'
-          }}
+          aria-live="polite"
         >
-          <div className="loader" style={{
-            border: `5px solid ${darkMode ? '#333' : '#f3f3f3'}`,
-            borderTop: '5px solid #FFAA00',
-            borderRadius: '50%',
-            width: '50px',
-            height: '50px',
-            animation: 'spin 1s linear infinite',
-            marginBottom: '20px'
-          }}></div>
-          <h2>Chargement du modèle YOLO...</h2>
-          <p>Préparation du système d'analyse d'objets</p>
+                   <div className="loader" aria-hidden="true"></div>
+          <h2>Chargement des modèles d'IA...</h2>
+          <p>Préparation des réseaux de neurones et bases de connaissances</p>
         </motion.div>
       )}
 
-      {/* Caméra & Canvas en plein écran */}
-      {!capturedImage ? (
-        <Webcam
-          audio={false}
-          screenshotFormat="image/jpeg"
-          videoConstraints={{ facingMode: cameraFacingMode, aspectRatio: 4/3 }}
-          style={{
-            position: 'absolute',
-            height: '100vh',
-            width: '100vw',
-            objectFit: 'cover',
-            transform: `scale(${zoomLevel})`,
-            filter: `brightness(${brightness}%)`
-          }}
-          ref={webcamRef}
-          className="webcam-fullscreen"
-          onUserMediaError={e => setErrorMessage('Erreur accès caméra : ' + e.message)}
-        />
-      ) : (
-        <img 
-          src={capturedImage} 
-          alt="Capture analysée"
-          style={{
-            position: 'absolute',
-            height: '100vh',
-            width: '100vw',
-            objectFit: 'contain',
-            backgroundColor: 'black'
-          }}
-        />
-      )}
-      
-      <canvas
-        ref={canvasRef}
-        width={640}
-        height={480}
-        style={{
-          position: 'absolute',
-          height: '100vh',
-          width: '100vw',
-          top: 0,
-          left: 0,
-          objectFit: capturedImage ? 'contain' : 'cover',
-          pointerEvents: 'none'
-        }}
-      />
-
-      {/* Overlay boutons flottants intégrés pour immersion */}
-      {showControls && (
-        <motion.div
-          className="controls-overlay"
-          initial={{ opacity: 0.8 }}
-          animate={{ opacity: 0.8 }}
-          exit={{ opacity: 0 }}
-          style={{
-            position: 'absolute',
-            bottom: 20,
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '15px',
-            pointerEvents: 'auto',
-            zIndex: 20
-          }}
-        >
-          <motion.button
-            className="control-button"
-            aria-label="Changer caméra"
-            onClick={switchCamera}
-            whileTap={{ scale: 0.9 }}
-            style={{
-              backgroundColor: 'rgba(0,0,0,0.6)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '50px',
-              height: '50px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <FaExchangeAlt size={24} />
-          </motion.button>
-          <motion.button
-            className="control-button"
-            onClick={() => setZoomLevel(z => Math.max(1, z - 0.1))}
-            disabled={zoomLevel <= 1}
-            aria-label="Zoom arrière"
-            whileTap={{ scale: 0.9 }}
-            style={{
-              backgroundColor: 'rgba(0,0,0,0.6)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '50px',
-              height: '50px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer',
-              opacity: zoomLevel <= 1 ? 0.5 : 1
-            }}
-          >
-            <BsZoomOut size={24} />
-          </motion.button>
-          <motion.button
-            className="control-button primary"
-            onClick={capturedImage ? resumeLiveDetection : capturePhoto}
-            aria-label={capturedImage ? 'Revenir à détection' : 'Prendre photo'}
-            whileTap={{ scale: 0.9 }}
-            style={{
-              backgroundColor: 'rgba(255,170,0,0.9)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '60px',
-              height: '60px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <FaCamera size={28} />
-          </motion.button>
-          <motion.button
-            className="control-button"
-            onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))}
-            disabled={zoomLevel >= 3}
-            aria-label="Zoom avant"
-            whileTap={{ scale: 0.9 }}
-            style={{
-              backgroundColor: 'rgba(0,0,0,0.6)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '50px',
-              height: '50px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer',
-              opacity: zoomLevel >= 3 ? 0.5 : 1
-            }}
-          >
-            <BsZoomIn size={24} />
-          </motion.button>
-          <motion.label
-            className="control-button file-upload-label"
-            aria-label="Charger image"
-            style={{
-              backgroundColor: 'rgba(0,0,0,0.6)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '50px',
-              height: '50px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <MdPhotoLibrary size={24} />
-            <input
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={e => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    setCapturedImage(reader.result);
-                    setIsDetecting(false);
-                    setTimeout(() => analyzeCapturedImage(reader.result), 200);
-                  };
-                  reader.readAsDataURL(file);
-                }
-              }}
-            />
-          </motion.label>
-          <motion.button
-            className="control-button"
-            aria-label={isFullscreen ? 'Quitter plein écran' : 'Plein écran'}
-            onClick={toggleFullscreen}
-            whileTap={{ scale: 0.9 }}
-            style={{
-              backgroundColor: 'rgba(0,0,0,0.6)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '50px',
-              height: '50px',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              cursor: 'pointer'
-            }}
-          >
-            <BsFullscreen size={24} />
-          </motion.button>
-        </motion.div>
-      )}
-
-      {/* Bouton audio on/off */}
-      <motion.button
-        className="audio-toggle"
-        onClick={() => setAudioEnabled(!audioEnabled)}
-        whileTap={{ scale: 0.9 }}
-        style={{
-          position: 'absolute',
-          top: 20,
-          left: 20,
-          backgroundColor: 'rgba(0,0,0,0.6)',
-          color: 'white',
-          border: 'none',
-          borderRadius: '50%',
-          width: '40px',
-          height: '40px',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          cursor: 'pointer',
-          zIndex: 20
-        }}
-      >
-        {audioEnabled ? <FaVolumeUp size={20} /> : <FaVolumeMute size={20} />}
-      </motion.button>
-
-      {/* Détails objets détectés */}
-      {selectedObject && (
-        <motion.div
-          className="object-detail-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="object-detail-title"
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 30 }}
-          style={{
-            position: 'absolute',
-            top: 60,
-            left: 20,
-            right: 20,
-            maxWidth: '500px',
-            backgroundColor: darkMode ? 'rgba(20,20,20,0.95)' : 'rgba(255,255,255,0.9)',
-            borderRadius: 8,
-            padding: 20,
-            zIndex: 30,
-            color: darkMode ? 'white' : 'black',
-            boxShadow: '0 0 15px rgba(0,0,0,0.4)',
-          }}
-          onClick={e => e.stopPropagation()}
-          onAnimationComplete={() => {
-            describeObjectVerbally(selectedObject);
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 id="object-detail-title" style={{ margin: 0 }}>
-              {selectedObject.icon} {selectedObject.class.replace('custom-', 'YOLO ')}
-            </h3>
-            <button
-              style={{
-                background: 'transparent',
-                border: 'none',
-                fontSize: '1.6rem',
-                cursor: 'pointer',
-                color: darkMode ? 'white' : 'black',
-              }}
-              aria-label="Fermer"
-              onClick={() => setSelectedObject(null)}
-            >
-              &times;
-            </button>
-          </div>
-
-          <p><strong>Confiance : </strong>{Math.round(selectedObject.score * 100)}%</p>
-          <p><strong>Caractéristiques :</strong> {selectedObject.caracteristiques}</p>
-          <p><strong>Utilisation :</strong> {selectedObject.utilisation}</p>
-          <p><strong>Catégories :</strong> {selectedObject.categories.join(', ')}</p>
-          <p><strong>Matériaux :</strong> {selectedObject.materiaux.join(', ')}</p>
-          <p><strong>Dimensions Moyennes :</strong></p>
-          <pre style={{ 
-            overflowX: 'auto', 
-            whiteSpace: 'pre-wrap', 
-            backgroundColor: darkMode ? 'rgba(0,0,0,0.3)' : 'rgba(240,240,240,0.8)',
-            padding: '8px',
-            borderRadius: '4px'
-          }}>
-            {JSON.stringify(selectedObject.dimensionsMoyennes, null, 2)}
-          </pre>
-          <p><strong>Analyse dimensionnelle :</strong></p>
-          <pre style={{ 
-            overflowX: 'auto', 
-            whiteSpace: 'pre-wrap', 
-            backgroundColor: darkMode ? 'rgba(0,0,0,0.3)' : 'rgba(240,240,240,0.8)',
-            padding: '8px',
-            borderRadius: '4px'
-          }}>
-            {JSON.stringify(selectedObject.analyseComplete, null, 2)}
-          </pre>
-          <p><strong>Potentiel texte :</strong> {selectedObject.analyseTexte?.potentiel}</p>
-          <p><strong>Zone texte :</strong> {selectedObject.analyseTexte?.zoneTexte}</p>
-          <p><strong>Histoire :</strong> {selectedObject.histoire}</p>
-          <p><strong>Conseil :</strong> {selectedObject.conseil}</p>
-        </motion.div>
-      )}
-
-      {/* Liste simple des objets détectés */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-          maxWidth: '250px',
-          maxHeight: '70vh',
-          overflowY: 'auto',
-          backgroundColor: darkMode ? 'rgba(10,10,10,0.85)' : 'rgba(255,255,255,0.85)',
-          borderRadius: 8,
-          padding: 10,
-          fontSize: 14,
-          zIndex: 25,
-          color: darkMode ? 'white' : 'black',
-          userSelect: 'none'
-        }}
-        aria-label="Liste des objets détectés"
-      >
-        <h4 style={{ marginTop: 0 }}>Objets détectés</h4>
-        {predictions.length === 0 && !loadingModel ? (
-          <p>En attente de détection...</p>
-        ) : (
-          <ul style={{ paddingLeft: 15, margin: 0 }}>
-            {predictions.map((item, idx) => {
-              const isSelected = selectedObject?.class === item.class;
-              return (
-                <li
-                  key={`${item.class}-${idx}`}
-                  style={{
-                    marginBottom: 6,
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? '#FFAA00AA' : 'transparent',
-                    color: isSelected ? 'white' : undefined,
-                    padding: '4px 6px',
-                    borderRadius: 4,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                  onClick={() => setSelectedObject(isSelected ? null : item)}
-                  role="option"
-                  aria-selected={isSelected}
-                  tabIndex={0}
-                  onKeyDown={e => {
-                    if (['Enter', ' '].includes(e.key)) {
-                      e.preventDefault();
-                      setSelectedObject(isSelected ? null : item);
-                    }
-                  }}
-                >
-                  <MdFiberManualRecord
-                    size={16}
-                    color='#FFAA00'
-                    aria-hidden="true"
-                  />
-                  <strong>{item.class.replace('custom-', 'YOLO ')}</strong> {(item.score * 100).toFixed(1)}%
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
-
-      {/* Message erreur */}
+      {/* Message d'erreur */}
       {errorMessage && (
         <motion.div
-          style={{
-            position: 'absolute',
-            bottom: 100,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            backgroundColor: 'rgba(255, 0, 0, 0.85)',
-            padding: '10px 20px',
-            borderRadius: 8,
-            color: 'white',
-            zIndex: 50,
-          }}
+          className="error-message"
+          initial={{ opacity: 0, y: -50 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -50 }}
           role="alert"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
         >
-          <FaInfoCircle style={{ marginRight: 8 }} aria-hidden="true" />
-          {errorMessage}
-          <button onClick={() => setErrorMessage(null)} style={{ marginLeft: 12, background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }} aria-label="Fermer">
-            x
-          </button>
+          <FaInfoCircle size={24} aria-hidden="true" />
+          <p>{errorMessage}</p>
+          <button onClick={() => setErrorMessage(null)} aria-label="Fermer le message d'erreur">Fermer</button>
         </motion.div>
       )}
 
-      {/* Indicateur de statistiques */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 90,
-          left: 20,
-          backgroundColor: 'rgba(0,0,0,0.6)',
-          color: 'white',
-          padding: '5px 10px',
-          borderRadius: 4,
-          fontSize: 12,
-          zIndex: 15
-        }}
-      >
-        <div>Détections YOLO: {detectionStats.yoloDetections}</div>
-        <div>FPS: {Math.round(1000 / detectionInterval)}</div>
-      </div>
+      <div className="main-content">
+        <div className="camera-container">
+          <div className="camera-view" aria-live="polite" aria-label="Flux vidéo avec détection d'objets">
+            {!capturedImage ? (
+              <>
+                <Webcam
+                  ref={webcamRef}
+                  audio={false}
+                  screenshotFormat="image/jpeg"
+                                   videoConstraints={{ facingMode: cameraFacingMode, aspectRatio: 4 / 3 }}
+                  className="webcam"
+                  style={{ filter: `brightness(${brightness}%)`, transform: `scale(${zoomLevel})` }}
+                />
+                <canvas ref={canvasRef} className="detection-canvas" />
+              </>
+            ) : (
+              <div className="captured-image-container">
+                <img src={capturedImage} alt="Image capturée" className="captured-image" />
+                <canvas ref={canvasRef} className="detection-canvas" />
+              </div>
+            )}
 
-      {/* Styles CSS pour l'animation du loader */}
-      <style jsx="true">{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
+            {/* Overlay de détail pour l'objet sélectionné */}
+            {selectedObject && (
+              <motion.div
+                className="object-detail-overlay"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="object-detail-title"
+                onAnimationComplete={() => {
+                  // Décrire verbalement l'objet une fois que l'animation est terminée
+                  describeObjectVerbally(selectedObject);
+                }}
+              >
+                <div className="object-detail-card">
+                  <div className="object-header">
+                    <div className="object-title">
+                      <span className="object-icon" aria-hidden="true">{selectedObject.icon}</span>
+                      <h3 id="object-detail-title">{selectedObject.class}</h3>
+                    </div>
+                    <button
+                      className="close-btn"
+                      onClick={() => setSelectedObject(null)}
+                      aria-label="Fermer les détails"
+                    >×</button>
+                  </div>
+
+                  <div className="object-body">
+                    <div className="confidence-meter"
+                      aria-label={`Niveau de confiance: ${(selectedObject.score * 100).toFixed(1)}%`}
+                    >
+                      <span>Confiance: {(selectedObject.score * 100).toFixed(1)}%</span>
+                      <div className="progress-bar" role="progressbar"
+                        aria-valuenow={(selectedObject.score * 100).toFixed(1)}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                      >
+                        <div
+                          className="progress"
+                          style={{
+                            width: `${selectedObject.score * 100}%`,
+                            backgroundColor:
+                              selectedObject.score > 0.7
+                                ? '#4CAF50'
+                                : selectedObject.score > 0.5
+                                  ? '#FFC107'
+                                  : '#F44336'
+                          }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Caractéristiques</h4>
+                      <p>{selectedObject.caracteristiques}</p>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Utilisation</h4>
+                      <p>{selectedObject.utilisation}</p>
+                    </div>
+
+                    <div className="detail-columns">
+                      <div className="detail-column">
+                        <h4>Catégories</h4>
+                        <ul>
+                          {selectedObject.categories.map((cat, i) => (
+                            <li key={i}>{cat}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="detail-column">
+                        <h4>Matériaux</h4>
+                        <ul>
+                          {selectedObject.materiaux.map((mat, i) => (
+                            <li key={i}>{mat}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Dimensions Moyennes</h4>
+                      <pre style={{ whiteSpace: 'pre-wrap' }}>
+                        {JSON.stringify(selectedObject.dimensionsMoyennes, null, 2)}
+                      </pre>
+                      <p><strong>Poids estimé:</strong> {selectedObject.poidsEstime}</p>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Analyse de la taille sur l'image</h4>
+                      <pre style={{ whiteSpace: 'pre-wrap' }}>
+                        {selectedObject.analyseComplete
+                          ? JSON.stringify(selectedObject.analyseComplete, null, 2)
+                          : 'Non disponible'}
+                      </pre>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Analyse du texte potentiel</h4>
+                      <p><strong>Potentiel:</strong> {selectedObject.analyseTexte?.potentiel || 'Non spécifié'}</p>
+                      <p><strong>Zone disponible:</strong> {selectedObject.analyseTexte?.zoneTexte || 'Non spécifiée'}</p>
+                    </div>
+
+                    <div className="detail-section">
+                      <h4>Histoire</h4>
+                      <p>{selectedObject.histoire}</p>
+                    </div>
+
+                    <div className="detail-section conseil">
+                      <h4>Conseil</h4>
+                      <p>{selectedObject.conseil}</p>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </div>
+
+          {/* Barre d'outils de caméra */}
+          <div className="camera-toolbar" role="toolbar" aria-label="Contrôles de caméra">
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              className="tool-button"
+              onClick={switchCamera}
+              title="Changer de caméra"
+              aria-label="Changer entre caméra avant et arrière"
+            >
+              <FaExchangeAlt />
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              className="tool-button"
+              onClick={() => setZoomLevel(prev => Math.max(1, prev - 0.1))}
+              disabled={zoomLevel <= 1}
+              title="Zoom arrière"
+              aria-label="Zoom arrière"
+            >
+              <BsZoomOut />
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              className={`tool-button ${!capturedImage ? "primary" : ""}`}
+              onClick={capturedImage ? analyzeImage : capturePhoto}
+              title={capturedImage ? "Analyser l'image" : "Prendre une photo"}
+              aria-label={capturedImage ? "Analyser l'image" : "Prendre une photo"}
+            >
+              <FaCamera />
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              className="tool-button"
+              onClick={() => setZoomLevel(prev => Math.min(3, prev + 0.1))}
+              disabled={zoomLevel >= 3}
+              title="Zoom avant"
+              aria-label="Zoom avant"
+            >
+              <BsZoomIn />
+            </motion.button>
+
+            <label className="tool-button" title="Charger une image" aria-label="Charger une image">
+              <MdPhotoLibrary />
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      setCapturedImage(reader.result);
+                      setIsDetecting(false);
+                      setTimeout(() => analyzeImage(), 100);
+                    };
+                    reader.readAsDataURL(file);
+                  }
+                }}
+              />
+            </label>
+          </div>
+
+          {/* Contrôles pour l'image capturée */}
+          {capturedImage && (
+            <div className="capture-controls">
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={resumeLiveDetection}
+                className="control-button"
+                aria-label="Retour à la caméra en direct"
+              >
+                Retour à la caméra
+              </motion.button>
+
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={() => {
+                  if (!capturedImage) return;
+                  const link = document.createElement('a');
+                  link.href = capturedImage;
+                  link.download = `detected-objects-${new Date().toISOString()}.jpg`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  speechManagerRef.current.speak("Image sauvegardée dans votre galerie", 2);
+                }}
+                className="control-button"
+                aria-label="Sauvegarder l'image"
+              >
+                <FaSave /> Sauvegarder l'image
+              </motion.button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

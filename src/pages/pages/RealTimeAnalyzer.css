@@ -1,0 +1,82 @@
+.real-time-analyzer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.detection-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.info-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  pointer-events: none;
+}
+
+.stats-panel {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 15px;
+  border-radius: 10px;
+  max-width: 300px;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(0, 255, 255, 0.5);
+}
+
+.object-details {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.detail-card {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 10px;
+  border-radius: 8px;
+  max-width: 300px;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(0, 255, 255, 0.5);
+}
+
+.object-types ul {
+  list-style-type: none;
+  padding-left: 10px;
+}
+
+/* Scrollbar personnalisée pour les détails */
+.object-details::-webkit-scrollbar {
+  width: 5px;
+}
+
+.object-details::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.object-details::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 255, 255, 0.5);
+  border-radius: 10px;
+}
+
