@@ -654,7 +654,7 @@ const Analyse = () => {
     // Formater les groupes en texte
     const descriptions = Object.keys(groupes).map(classe => {
       const nombre = groupes[classe].length;
-      const pluriel = nombre > 1 ? "s" : "";
+           const pluriel = nombre > 1 ? "s" : "";
       return `${nombre} ${classe}${pluriel}`;
     });
 
@@ -703,6 +703,107 @@ const Analyse = () => {
   }, [zoomLevel]);
 
   /**
+   * Prétraite et redimensionne l'image pour le modèle YOLO à la taille attendue
+   * @param {HTMLImageElement|HTMLVideoElement} image - Élément image ou vidéo à prétraiter
+   * @param {Object} model - Modèle YOLO chargé
+   * @returns {tf.Tensor3D} - Tensor prêt pour l'inférence
+   */
+  const preprocessImageForYOLO = useCallback((image, model) => {
+    if (!model) return null;
+    
+    // Récupérer la taille d'entrée attendue par le modèle YOLO
+    const inputShape = model.inputs[0].shape;
+    // La forme est généralement [null, height, width, channels]
+    const yoloWidth = inputShape[2];
+    const yoloHeight = inputShape[1];
+    
+    // Conversion de l'image en tensor
+    const tensor = tf.browser.fromPixels(image);
+    
+    // Redimensionner pour correspondre à l'entrée du modèle YOLO
+    const resized = tf.image.resizeBilinear(tensor, [yoloHeight, yoloWidth]);
+    
+    // Normaliser entre 0 et 1
+    const normalized = resized.div(255.0);
+    
+    // Ajouter la dimension batch [1, height, width, 3]
+    const batched = normalized.expandDims(0);
+    
+    // Nettoyer les tensors temporaires
+    tensor.dispose();
+    resized.dispose();
+    normalized.dispose();
+    
+    return batched;
+  }, []);
+
+  /**
+   * Traite les résultats du modèle YOLO et les convertit au format compatible avec COCO-SSD
+   * @param {tf.Tensor} output - Sortie du modèle YOLO
+   * @param {number} imgWidth - Largeur originale de l'image
+   * @param {number} imgHeight - Hauteur originale de l'image
+   * @param {number} scoreThreshold - Seuil de confiance minimal pour les détections
+   * @returns {Array} - Prédictions au format compatible avec COCO-SSD
+   */
+  const processYOLOOutput = useCallback((output, imgWidth, imgHeight, scoreThreshold = 0.25) => {
+    // Le format de sortie de YOLO dépend de l'implémentation exacte
+    // Cet exemple suppose une sortie standard avec des boîtes de délimitation, des scores de confiance et des classes
+    
+    // Convertir le tensor en tableau JavaScript
+    const outputArray = Array.from(output.dataSync());
+    const modelWidth = output.shape[2];
+    const modelHeight = output.shape[1];
+    const numClasses = (output.shape[3] - 5); // 5 = x, y, w, h, confidence
+    
+    const predictions = [];
+    const numBoxes = outputArray.length / (numClasses + 5);
+    
+    for (let i = 0; i < numBoxes; i++) {
+      const baseIndex = i * (numClasses + 5);
+      const confidence = outputArray[baseIndex + 4];
+      
+      if (confidence > scoreThreshold) {
+        // Trouver la classe avec le score le plus élevé
+        let maxClassScore = 0;
+        let classIndex = 0;
+        
+        for (let c = 0; c < numClasses; c++) {
+          const classScore = outputArray[baseIndex + 5 + c];
+          if (classScore > maxClassScore) {
+            maxClassScore = classScore;
+            classIndex = c;
+          }
+        }
+        
+        const score = confidence * maxClassScore;
+        
+        if (score > scoreThreshold) {
+          // Récupérer les coordonnées (format YOLO)
+          let x = outputArray[baseIndex];
+          let y = outputArray[baseIndex + 1];
+          let w = outputArray[baseIndex + 2];
+          let h = outputArray[baseIndex + 3];
+          
+          // Convertir de coordonnées normalisées à pixels
+          x = (x - w/2) * imgWidth;
+          y = (y - h/2) * imgHeight;
+          w = w * imgWidth;
+          h = h * imgHeight;
+          
+          predictions.push({
+            bbox: [x, y, w, h],
+            class: `custom-${classIndex}`, // Préfixe pour distinguer des classes COCO
+            score: score,
+            source: 'YOLO' // Marquer comme provenant de YOLO
+          });
+        }
+      }
+    }
+    
+    return predictions;
+  }, []);
+
+  /**
    * Fonction principale de détection d'objets
    */
   const detectObjects = useCallback(async () => {
@@ -737,6 +838,34 @@ const Analyse = () => {
       
       // Combiner les résultats des différents modèles
       let allResults = [...cocoResults];
+      
+      // Ajouter les prédictions du modèle YOLO si disponible
+      if (modelRef.current.yoloModel) {
+        try {
+          // Prétraiter l'image spécifiquement pour YOLO
+          const yoloTensor = preprocessImageForYOLO(video, modelRef.current.yoloModel);
+          
+          if (yoloTensor) {
+            // Exécuter l'inférence avec le modèle YOLO
+            const yoloOutput = modelRef.current.yoloModel.predict(yoloTensor);
+            
+            // Traiter les résultats de YOLO et les convertir en format compatible
+            const yoloResults = processYOLOOutput(yoloOutput, videoWidth, videoHeight);
+            
+            // Libérer la mémoire
+            yoloTensor.dispose();
+            yoloOutput.dispose();
+            
+            // Ajouter les résultats de YOLO à nos prédictions
+            allResults = [...allResults, ...yoloResults];
+            
+            addLog(`YOLO a détecté ${yoloResults.length} objets`, "info");
+          }
+        } catch (yoloError) {
+          console.error("Erreur lors de la détection YOLO:", yoloError);
+          addLog(`Erreur YOLO: ${yoloError.message}`, "error");
+        }
+      }
       
       // Enrichir les prédictions avec des informations supplémentaires
       const enrichedPredictions = enrichPredictions(allResults);
@@ -819,14 +948,14 @@ const Analyse = () => {
             JSON.stringify(selectedObject.bbox) === JSON.stringify(prediction.bbox);
           
           // Couleur basée sur la source et la confiance
-          let strokeColor = "rgba(0, 255, 0, 0.8)";
-          
+          let strokeColor = "rgba(0, 255, 0, 0.8)"; // Vert pour COCO-SSD par défaut
+
           if (isSelected) {
             strokeColor = "rgba(255, 215, 0, 0.9)"; // Or pour la sélection
           } else if (prediction.source === 'YOLO') {
-            strokeColor = "rgba(0, 191, 255, 0.8)"; // Bleu pour YOLO
+            strokeColor = "rgba(255, 165, 0, 0.8)"; // Orange pour YOLO
           } else if (prediction.score < 0.6) {
-            strokeColor = "rgba(255, 165, 0, 0.8)"; // Orange pour faible confiance
+            strokeColor = "rgba(255, 69, 0, 0.8)"; // Rouge orangé pour faible confiance
           }
           
           // Dessiner le rectangle
@@ -888,7 +1017,7 @@ const Analyse = () => {
     // Planifier la prochaine frame d'animation
     animationFrameRef.current = requestAnimationFrame(detectObjects);
   }, [isDetecting, detectionInterval, brightness, zoomLevel, selectedObject, audioEnabled, detectionMode, 
-      genererDescriptionScene, preprocessImage, addLog]);
+      genererDescriptionScene, preprocessImage, preprocessImageForYOLO, processYOLOOutput, addLog]);
 
   // Démarrer la détection lorsque le composant est monté
   useEffect(() => {
@@ -924,11 +1053,42 @@ const Analyse = () => {
         try {
           // Analyse avec le modèle COCO-SSD
           const tensor = preprocessImage(img);
-          const results = await modelRef.current.cocoModel.detect(tensor);
+          const cocoResults = await modelRef.current.cocoModel.detect(tensor);
           tensor.dispose();
           
+          // Combiner les résultats des différents modèles
+          let allResults = [...cocoResults];
+          
+          // Ajouter les prédictions du modèle YOLO si disponible
+          if (modelRef.current.yoloModel) {
+            try {
+              // Prétraiter l'image spécifiquement pour YOLO
+              const yoloTensor = preprocessImageForYOLO(img, modelRef.current.yoloModel);
+              
+              if (yoloTensor) {
+                // Exécuter l'inférence avec le modèle YOLO
+                const yoloOutput = modelRef.current.yoloModel.predict(yoloTensor);
+                
+                // Traiter les résultats de YOLO et les convertir en format compatible
+                const yoloResults = processYOLOOutput(yoloOutput, img.width, img.height);
+                
+                // Libérer la mémoire
+                yoloTensor.dispose();
+                yoloOutput.dispose();
+                
+                // Ajouter les résultats de YOLO à nos prédictions
+                allResults = [...allResults, ...yoloResults];
+                
+                addLog(`YOLO a détecté ${yoloResults.length} objets dans l'image capturée`, "info");
+              }
+            } catch (yoloError) {
+              console.error("Erreur lors de la détection YOLO:", yoloError);
+              addLog(`Erreur YOLO: ${yoloError.message}`, "error");
+            }
+          }
+          
           // Enrichir les résultats
-          const enrichedResults = enrichPredictions(results);
+          const enrichedResults = enrichPredictions(allResults);
           setPredictions(enrichedResults);
           
           // Mettre à jour les analyses dimensionnelles
@@ -959,7 +1119,7 @@ const Analyse = () => {
         }
       };
     }
-  }, [webcamRef, audioEnabled, setIsDetecting, preprocessImage, analyserDimensionsObjets, genererDescriptionScene, addLog]);
+  }, [webcamRef, audioEnabled, setIsDetecting, preprocessImage, preprocessImageForYOLO, processYOLOOutput, analyserDimensionsObjets, genererDescriptionScene, addLog]);
 
   // Retourner à la vue webcam depuis l'image capturée
   const retourWebcam = useCallback(() => {
@@ -1219,7 +1379,7 @@ const Analyse = () => {
                   >
                     <option value="fast">Rapide (moins précis)</option>
                     <option value="normal">Normal (équilibré)</option>
-                    <option value="detail">Détaillé (plus lent)</option>
+                                       <option value="detail">Détaillé (plus lent)</option>
                   </select>
                 </div>
                 
@@ -1241,123 +1401,105 @@ const Analyse = () => {
                       checked={enableCloudAnalysis}
                       onChange={() => setEnableCloudAnalysis(!enableCloudAnalysis)}
                     />
-                    Analyse cloud avancée
+                    Analyse cloud (plus précise)
                   </label>
-                  <p className="setting-note">
-                    {enableCloudAnalysis ? 
-                      "L'analyse cloud permet des détections plus précises mais nécessite une connexion internet." :
-                      "L'analyse locale est plus rapide mais moins précise pour certains objets."}
-                  </p>
                 </div>
+                
+                <button onClick={() => setShowSettings(false)}>Fermer</button>
               </motion.div>
             )}
           </AnimatePresence>
           
+          {/* Panel d'informations détaillées sur l'objet sélectionné */}
           <AnimatePresence>
             {selectedObject && (
               <motion.div 
-                className="object-details-panel"
-                initial={{ opacity: 0, x: 100 }}
+                className="object-info-panel"
+                initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 100 }}
+                exit={{ opacity: 0, x: 20 }}
               >
-                <button 
-                  className="close-button"
-                  onClick={() => setSelectedObject(null)}
-                >
-                  ×
-                </button>
-                
                 <h3>
-                  {selectedObject.icon && <span className="detail-icon">{selectedObject.icon} </span>}
-                  {selectedObject.class} 
-                  <span className="confidence">
+                  {selectedObject.icon && <span className="object-icon">{selectedObject.icon} </span>}
+                  {selectedObject.class}
+                  <span className="confidence-badge" style={{ 
+                    backgroundColor: selectedObject.score > 0.8 ? '#4caf50' : selectedObject.score > 0.6 ? '#ff9800' : '#f44336' 
+                  }}>
                     {Math.round(selectedObject.score * 100)}%
                   </span>
+                  <button className="close-button" onClick={() => setSelectedObject(null)}>×</button>
                 </h3>
                 
-                <div className="detail-section">
-                  <h4>Caractéristiques</h4>
-                  <p>{selectedObject.caracteristiques || "Information non disponible"}</p>
+                <div className="info-source">
+                  <small>Détecté par: {selectedObject.source || 'COCO-SSD'}</small>
                 </div>
                 
-                <div className="detail-section">
-                  <h4>Utilisation</h4>
-                  <p>{selectedObject.utilisation || "Information non disponible"}</p>
-                </div>
-                
-                <div className="detail-section">
-                  <h4>Catégories</h4>
-                  <div className="tags">
-                    {selectedObject.categories ? 
-                      selectedObject.categories.map((cat, i) => (
-                        <span key={i} className="tag">{cat}</span>
-                      )) :
-                      <span className="tag">Non classifié</span>
-                    }
-                  </div>
-                </div>
-                
-                <div className="detail-section">
-                  <h4>Matériaux</h4>
-                  <div className="tags">
-                    {selectedObject.materiaux ? 
-                      selectedObject.materiaux.map((mat, i) => (
-                        <span key={i} className="tag material-tag">{mat}</span>
-                      )) :
-                      <span className="tag">Inconnu</span>
-                    }
-                  </div>
-                </div>
-                
-                <div className="detail-section">
-                  <h4>Dimensions</h4>
-                  <div className="dimensions-info">
-                    <p>
-                      <strong>Dans l'image:</strong> {selectedObject.dimensions.pixels.width} × {selectedObject.dimensions.pixels.height} pixels
-                    </p>
-                    {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')] && (
-                      <>
+                <div className="object-info-content">
+                  {selectedObject.caracteristiques && (
+                    <div className="info-section">
+                      <h4>Caractéristiques</h4>
+                      <p>{selectedObject.caracteristiques}</p>
+                    </div>
+                  )}
+                  
+                  {selectedObject.utilisation && (
+                    <div className="info-section">
+                      <h4>Utilisation</h4>
+                      <p>{selectedObject.utilisation}</p>
+                    </div>
+                  )}
+                  
+                  {selectedObject.categories && selectedObject.categories.length > 0 && (
+                    <div className="info-section">
+                      <h4>Catégories</h4>
+                      <div className="tags">
+                        {selectedObject.categories.map((cat, index) => (
+                          <span key={index} className="tag">{cat}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedObject.materiaux && selectedObject.materiaux.length > 0 && (
+                    <div className="info-section">
+                      <h4>Matériaux courants</h4>
+                      <div className="tags">
+                        {selectedObject.materiaux.map((mat, index) => (
+                          <span key={index} className="tag">{mat}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')] && (
+                    <div className="info-section">
+                      <h4>Analyse dimensionnelle</h4>
+                      <div className="dimension-info">
                         <p>
-                          <strong>Proportion:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].proportionImage.surface} de l'image
+                          <strong>Dimensions (px):</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].taillePixels.largeur} × {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].taillePixels.hauteur}
+                        </p>
+                        <p>
+                          <strong>Proportion:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].proportionImage.surface}
                         </p>
                         <p>
                           <strong>Distance estimée:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].distanceEstimee}
                         </p>
-                      </>
-                    )}
-                    {selectedObject.dimensions.estimationTailleReelle && Object.entries(selectedObject.dimensions.estimationTailleReelle).filter(([key]) => key !== 'ratioImage' && key !== 'surface' && key !== 'proportionImage').length > 0 && (
-                      <p>
-                        <strong>Dimensions moyennes:</strong><br />
-                        {Object.entries(selectedObject.dimensions.estimationTailleReelle)
-                          .filter(([key]) => key !== 'ratioImage' && key !== 'surface' && key !== 'proportionImage')
-                          .map(([key, value]) => `${key}: ${value}`)
-                          .join(', ')}
-                      </p>
-                    )}
-                    <p><strong>Poids estimé:</strong> {selectedObject.poidsEstime || "Inconnu"}</p>
-                  </div>
-                </div>
-                
-                <div className="detail-section">
-                  <h4>Conseil</h4>
-                  <p>{selectedObject.conseil || "Aucun conseil disponible"}</p>
-                </div>
-                
-                <div className="detail-section">
-                  <h4>Histoire</h4>
-                  <p>{selectedObject.histoire || "Information historique non disponible"}</p>
-                </div>
-                
-                <div className="detail-section">
-                  <h4>Analyse texte potentiel</h4>
-                  <p>{selectedObject.analyseTexte.potentiel || "Aucun texte attendu"}</p>
-                  <p className="text-note">{selectedObject.analyseTexte.zoneTexte}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedObject.conseil && (
+                    <div className="info-section">
+                      <h4>Conseil</h4>
+                      <p className="tip">{selectedObject.conseil}</p>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
           
+          {/* Panneau des logs d'IA */}
           <AnimatePresence>
             {showAiLogs && (
               <motion.div 
@@ -1366,41 +1508,23 @@ const Analyse = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 20 }}
               >
-                                <h3>Journal d'activité IA</h3>
-                <div className="logs-container">
+                <div className="logs-header">
+                  <h3><FaBrain /> Logs d'IA</h3>
+                  <button onClick={() => setShowAiLogs(false)}>×</button>
+                </div>
+                <div className="logs-content">
                   {aiLogs.map((log, index) => (
-                    <div key={index} className={`log-entry ${log.type}`}>
+                    <div key={index} className={`log-entry log-${log.type}`}>
                       <span className="log-time">{log.timestamp}</span>
                       <span className="log-message">{log.message}</span>
                     </div>
                   ))}
                 </div>
-                <button 
-                  className="clear-logs-button"
-                  onClick={() => setAiLogs([])}
-                >
-                  Effacer les logs
-                </button>
               </motion.div>
             )}
           </AnimatePresence>
         </>
       )}
-      
-      {/* Fenêtre d'information sur l'application */}
-      <div className="info-button" onClick={() => {
-        const infoMessage = "Système d'analyse et de détection d'objets en temps réel.\n\n" +
-                           "Cette application utilise l'IA pour identifier et analyser les objets visibles par votre caméra. " +
-                           "Cliquez sur un objet détecté pour obtenir plus d'informations. " +
-                           "Toutes les analyses sont effectuées localement sur votre appareil.";
-        
-        if (audioEnabled) {
-          speechManagerRef.current.speak(infoMessage.replace(/\n/g, ' '), 3);
-        }
-        alert(infoMessage);
-      }}>
-        <MdOutlineInfo />
-      </div>
     </div>
   );
 };
