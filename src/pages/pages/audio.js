@@ -4,13 +4,30 @@ import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaVolumeUp, FaVolumeMute } from 'react-icons/fa';
+import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaVolumeUp, FaVolumeMute, FaRobot, FaBrain } from 'react-icons/fa';
 import { BsZoomIn, BsZoomOut } from 'react-icons/bs';
-import { MdPhotoLibrary } from 'react-icons/md';
+import { MdPhotoLibrary, MdOutlineInfo } from 'react-icons/md';
 import './Analyse.css';
 
 // On initialise avec un objet vide qui sera remplacé par les données du fichier JSON
 let objetInfos = {};
+
+// Tableaux de noms de classes pour le modèle YOLO personnalisé
+const YOLO_CLASSES = [
+  "personne", "vélo", "voiture", "moto", "avion", "bus", "train", "camion", 
+  "bateau", "feu-tricolore", "bouche-incendie", "panneau-stop", "parcmètre", 
+  "banc", "oiseau", "chat", "chien", "cheval", "mouton", "vache", "éléphant", 
+  "ours", "zèbre", "girafe", "sac-à-dos", "parapluie", "sac-à-main", "cravate", 
+  "valise", "frisbee", "skis", "snowboard", "ballon-sport", "cerf-volant", 
+  "batte-baseball", "gant-baseball", "skateboard", "planche-surf", "raquette-tennis", 
+  "bouteille", "verre-vin", "tasse", "fourchette", "couteau", "cuillère", "bol", 
+  "banane", "pomme", "sandwich", "orange", "brocoli", "carotte", "hot-dog", 
+  "pizza", "donut", "gâteau", "chaise", "canapé", "plante-en-pot", "lit", 
+  "table-à-manger", "toilettes", "téléviseur", "ordinateur-portable", "souris", 
+  "télécommande", "clavier", "téléphone", "micro-ondes", "four", "grille-pain", 
+  "évier", "réfrigérateur", "livre", "horloge", "vase", "ciseaux", "ours-en-peluche", 
+  "sèche-cheveux", "brosse-à-dents", "écouteurs", "clé", "lunettes", "montre", "stylo"
+];
 
 /**
  * Simule le chargement d'un modèle d'IA personnalisé en complément de COCO-SSD
@@ -30,8 +47,17 @@ const loadCustomModel = async () => {
  */
 const enrichPredictions = (predictions) => {
   return predictions.map(prediction => {
-    const baseInfo = objetInfos[prediction.class] || {
-      icon: prediction.class.includes('custom-') ? '🔧' : '❓',
+    // Utiliser notre liste personnalisée de noms de classes pour YOLO si c'est une détection custom
+    let className = prediction.class;
+    if (className.startsWith('custom-')) {
+      const classId = parseInt(className.replace('custom-', ''));
+      if (classId >= 0 && classId < YOLO_CLASSES.length) {
+        className = YOLO_CLASSES[classId];
+      }
+    }
+
+    const baseInfo = objetInfos[className] || {
+      icon: className.includes('custom-') ? '🔧' : '❓',
       caracteristiques: "Informations non disponibles dans notre base de connaissances.",
       utilisation: "Utilisation non spécifiée.",
       categories: ["non classifié"],
@@ -59,6 +85,7 @@ const enrichPredictions = (predictions) => {
     
     return {
       ...prediction,
+      class: className, // Utiliser le nom de classe traduit
       ...baseInfo,
       detectedAt: new Date().toISOString(),
       certainty: prediction.score > 0.8 ? "Élevée" : prediction.score > 0.6 ? "Moyenne" : "Faible",
@@ -69,7 +96,8 @@ const enrichPredictions = (predictions) => {
       analyseTexte: {
         potentiel: baseInfo.textePotentiel,
         zoneTexte: width > 100 && height > 30 ? "Zone suffisante pour contenir du texte" : "Zone probablement trop petite pour du texte lisible"
-      }
+      },
+      source: prediction.class.includes('custom-') ? 'YOLO' : 'COCO-SSD'
     };
   });
 };
@@ -114,6 +142,7 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
 
 /**
  * Gestion intelligente des commentaires vocaux avec contrôle des délais
+ * et voix masculine
  */
 class SpeechManager {
   constructor() {
@@ -126,6 +155,8 @@ class SpeechManager {
     // Pour la synchronisation audio-vidéo
     this.lastFrameTime = 0;
     this.frameDelayThreshold = 30; // ms
+    // Voix préférée (masculine)
+    this.preferredVoice = null;
   }
 
   // Initialisation du contexte audio pour une meilleure synchronisation
@@ -135,8 +166,48 @@ class SpeechManager {
       if (window.AudioContext || window.webkitAudioContext) {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
+      
+      // Initialiser la voix masculine
+      this.initializeVoice();
     } catch (error) {
       console.error("Impossible d'initialiser l'AudioContext:", error);
+    }
+  }
+  
+  // Recherche et configure une voix masculine en français
+  initializeVoice() {
+    if (!window.speechSynthesis) return;
+    
+    // S'assurer que les voix sont chargées
+    const checkVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        // Priorité: voix masculine française
+        this.preferredVoice = voices.find(voice => 
+          voice.lang.includes('fr') && voice.name.toLowerCase().includes('male'));
+        
+        // Si aucune voix masculine française n'est trouvée, essayer une voix française
+        if (!this.preferredVoice) {
+          this.preferredVoice = voices.find(voice => voice.lang.includes('fr'));
+        }
+        
+        // Si toujours pas de voix, prendre une voix masculine quelconque
+        if (!this.preferredVoice) {
+          this.preferredVoice = voices.find(voice => voice.name.toLowerCase().includes('male'));
+        }
+        
+        console.log("Voix sélectionnée:", this.preferredVoice ? this.preferredVoice.name : "Voix par défaut");
+      } else {
+        // Réessayer si les voix ne sont pas encore chargées
+        setTimeout(checkVoices, 100);
+      }
+    };
+    
+    // Chrome nécessite un événement, Firefox non
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = checkVoices;
+    } else {
+      checkVoices();
     }
   }
 
@@ -220,6 +291,14 @@ class SpeechManager {
     utterance.lang = 'fr-FR';
     utterance.rate = 1.1; // Légèrement plus rapide pour une expérience plus fluide
     
+    // Appliquer la voix masculine si disponible
+    if (this.preferredVoice) {
+      utterance.voice = this.preferredVoice;
+    }
+    
+    // Paramètres pour voix masculine
+    utterance.pitch = 0.9; // Légèrement plus grave
+    
     // Préparer la synthèse en avance pour réduire la latence
     if (this.audioContext) {
       // Créer un petit son silencieux pour débloquer l'audio si nécessaire
@@ -288,6 +367,8 @@ const Analyse = () => {
   const [enableCloudAnalysis, setEnableCloudAnalysis] = useState(false);
   const [objectAnalyses, setObjectAnalyses] = useState({});
   const [lastSceneDescription, setLastSceneDescription] = useState("");
+  const [aiLogs, setAiLogs] = useState([]); // État pour les logs d'IA
+  const [showAiLogs, setShowAiLogs] = useState(true); // Afficher/masquer les logs
 
   // Références pour optimisation
   const lastPredictionsRef = useRef([]);
@@ -295,6 +376,17 @@ const Analyse = () => {
   const lastDetectionTimeRef = useRef(0);
   const detectionInterval = detectionMode === "fast" ? 300 : detectionMode === "detail" ? 100 : 200;
   const lastDescriptionTimeRef = useRef(0);
+  
+  // Fonction pour ajouter des logs
+  const addLog = useCallback((message, type = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    setAiLogs(prevLogs => {
+      // Limiter à 100 logs maximum
+      const newLogs = [...prevLogs, { message, type, timestamp }];
+      if (newLogs.length > 100) return newLogs.slice(-100);
+      return newLogs;
+    });
+  }, []);
   
   // Appliquer le mode sombre
   useEffect(() => {
@@ -309,6 +401,7 @@ const Analyse = () => {
   // Initialiser le gestionnaire audio au démarrage
   useEffect(() => {
     speechManagerRef.current.initialize();
+    addLog("Initialisation du gestionnaire audio", "system");
     
     // Nettoyer l'animation frame à la fermeture pour éviter les fuites mémoire
     return () => {
@@ -317,16 +410,18 @@ const Analyse = () => {
       }
       speechManagerRef.current.cancel();
     };
-  }, []);
+  }, [addLog]);
 
   // Optimisation du chargement des modèles et configuration TensorFlow
   useEffect(() => {
     const loadModelsAndData = async () => {
       try {
         setLoadingModel(true);
+        addLog("Démarrage du chargement des modèles", "system");
         
         // Configuration TensorFlow optimisée pour GPU
         await tf.ready();
+        addLog("TensorFlow.js initialisé", "system");
         
         // Optimisation de la mémoire GPU/WebGL - valeurs à ajuster selon les performances
         tf.env().set('WEBGL_FLUSH_THRESHOLD', 2); // Réduire pour économiser la mémoire GPU
@@ -336,16 +431,16 @@ const Analyse = () => {
         
         // Activer WebGL explicitement
         await tf.setBackend('webgl');
-        console.log("Backend TensorFlow.js:", tf.getBackend());
+        addLog(`Backend TensorFlow.js: ${tf.getBackend()}`, "success");
         
         // Chargement dynamique du fichier JSON avec les données des objets
-        console.log("Chargement des données des objets...");
+        addLog("Chargement des données des objets...", "system");
         const module = await import('./objetInfos.json');
         objetInfos = module.default;
-        console.log("Données des objets chargées");
+        addLog("Données des objets chargées avec succès", "success");
         
         // Chargement des modèles en parallèle
-        console.log("Chargement des modèles d'IA...");
+        addLog("Chargement des modèles d'IA...", "system");
         
         const modelPromises = [
           cocoSsd.load({
@@ -355,9 +450,10 @@ const Analyse = () => {
         
         // Ajouter le chargement YOLO à la liste des promesses
         try {
+          addLog("Tentative de chargement du modèle YOLO personnalisé...", "system");
           modelPromises.push(tf.loadGraphModel('/models/lifemodo_tfjs/model.json'));
         } catch (error) {
-          console.log("Modèle YOLO non disponible, continuer sans lui");
+          addLog("Modèle YOLO non disponible, continuons sans lui", "warning");
         }
         
         // Attendre que tous les modèles soient chargés
@@ -375,14 +471,22 @@ const Analyse = () => {
           throw new Error("Impossible de charger le modèle COCO-SSD");
         }
         
+        addLog("Modèle COCO-SSD chargé avec succès", "success");
+        
+        if (modelRef.current.yoloModel) {
+          addLog("Modèle YOLO personnalisé chargé avec succès", "success");
+        }
+        
         setLoadingModel(false);
         
         // Message de bienvenue avec délai pour assurer la disponibilité audio
         setTimeout(() => {
-          speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi", 3);
+          speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi. Je suis votre assistant de détection visuelle.", 3);
+          addLog("Système d'IA prêt à détecter les objets", "success");
         }, 500);
       } catch (error) {
         console.error("Erreur lors du chargement:", error);
+        addLog(`ERREUR: ${error.message}`, "error");
         setErrorMessage(`Impossible de charger les données ou les modèles d'IA. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
         setLoadingModel(false);
       }
@@ -393,7 +497,7 @@ const Analyse = () => {
     return () => {
       // Nettoyage à la fermeture
       speechManagerRef.current.cancel();
-      console.log("Nettoyage des ressources...");
+      addLog("Nettoyage des ressources...", "system");
       // Libérer explicitement la mémoire TensorFlow
       if (tf.getBackend() === 'webgl') {
         // @ts-ignore
@@ -405,7 +509,7 @@ const Analyse = () => {
         }
       }
     };
-  }, [detectionMode]);
+  }, [detectionMode, addLog]);
   
   /**
    * Génère une description de la scène à partir des objets détectés,
@@ -473,6 +577,10 @@ const Analyse = () => {
         const priority = isNewObject ? 2 : 1;
         speechManagerRef.current.speak(description, priority, objectId, frameTime);
         
+        // Ajouter aux logs
+        addLog(`Détection: ${prediction.class} (${Math.round(prediction.score * 100)}%) - ${prediction.source}`, 
+               prediction.score > 0.7 ? "success" : "info");
+        
         // Mettre à jour quand cet objet a été décrit pour la dernière fois
         objectHistory.lastDescribed = now;
       }
@@ -495,11 +603,12 @@ const Analyse = () => {
         if (sceneDesc !== lastSceneDescription) {
           setLastSceneDescription(sceneDesc);
           speechManagerRef.current.speak(sceneDesc, 1.5, null, frameTime);
+          addLog(`Scène: ${sceneDesc}`, "highlight");
           lastDescriptionTimeRef.current = now;
         }
       }
     }
-  }, [audioEnabled]);
+  }, [audioEnabled, addLog]);
   
   /**
    * Fonction principale de détection d'objets et dessin
@@ -551,7 +660,14 @@ const Analyse = () => {
           const videoTensor = tf.browser.fromPixels(video);
           
           // Obtenir les prédictions COCO-SSD
+          const startTime = performance.now();
           const cocoPredictions = await modelRef.current.cocoModel.detect(videoTensor);
+          const cocoTime = performance.now() - startTime;
+          
+          // Log de performance COCO
+          if (cocoPredictions.length > 0) {
+            addLog(`COCO-SSD: ${cocoPredictions.length} objets en ${cocoTime.toFixed(0)}ms`, "performance");
+          }
           
           // Libérer le tenseur après utilisation
           videoTensor.dispose();
@@ -563,6 +679,7 @@ const Analyse = () => {
           if (modelRef.current.yoloModel) {
             try {
               // Préparation de l'entrée pour YOLO
+              const yoloStartTime = performance.now();
               const inputTensor = tf.browser.fromPixels(video)
                 .resizeNearestNeighbor([640, 640])
                 .expandDims()
@@ -586,6 +703,7 @@ const Analyse = () => {
               
               // Récupérer les prédictions brutes
               const yoloRawPredictions = yoloData[0];
+              let yoloDetectionCount = 0;
               
               // Convertir les prédictions YOLO au format compatible
               for (let i = 0; i < yoloRawPredictions.length; i++) {
@@ -604,10 +722,20 @@ const Analyse = () => {
                     class: `custom-${Math.round(classId)}`, 
                     score
                   });
+                  yoloDetectionCount++;
                 }
               }
+              
+              const yoloTime = performance.now() - yoloStartTime;
+              
+              // Log de performance YOLO
+              if (yoloDetectionCount > 0) {
+                addLog(`YOLO: ${yoloDetectionCount} objets en ${yoloTime.toFixed(0)}ms`, "performance");
+              }
+              
             } catch (yoloError) {
               console.error("Erreur lors de l'inférence YOLO:", yoloError);
+              addLog(`Erreur YOLO: ${yoloError.message}`, "error");
               // Continuer avec seulement les prédictions COCO-SSD en cas d'erreur
             }
           }
@@ -654,6 +782,7 @@ const Analyse = () => {
             });
             
             setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
+            
             // Générer des descriptions audio des objets détectés avec le timestamp pour synchronisation
             generateSceneDescription(enhancedPredictions, isNewScene, frameTimestamp);
           }
@@ -680,11 +809,11 @@ const Analyse = () => {
           
           // Dessiner les rectangles et étiquettes des objets détectés
           enhancedPredictions.forEach(prediction => {
-            const [x, y, width, height] = prediction.bbox;
+                     const [x, y, width, height] = prediction.bbox;
             const isSelected = selectedObject && selectedObject.class === prediction.class;
 
             // Style du rectangle
-            ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
+            ctx.strokeStyle = isSelected ? '#FF3366' : prediction.source === 'YOLO' ? '#36BBFF' : '#00FFFF';
             ctx.lineWidth = isSelected ? 4 : 2;
             ctx.lineJoin = 'round';
 
@@ -699,10 +828,12 @@ const Analyse = () => {
 
             // Créer étiquette avec info-bulle pour chaque objet détecté
             const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
+            const modelText = prediction.source || "IA";
             const textWidth = ctx.measureText(text).width + 20;
             const bubbleHeight = 30;
 
-            ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+            ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 
+                           prediction.source === 'YOLO' ? 'rgba(54, 187, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
 
             // Créer bulle d'arrière-plan pour le texte
             ctx.beginPath();
@@ -732,9 +863,42 @@ const Analyse = () => {
               x + 5,
               y > bubbleHeight + 10 ? y - bubbleHeight / 2 - 5 : y + height + bubbleHeight / 2 + 5
             );
+            
+            // Ajouter badge indiquant la source du modèle
+            ctx.fillStyle = prediction.source === 'YOLO' ? 'rgba(0, 100, 200, 0.9)' : 'rgba(50, 50, 50, 0.9)';
+            const modelBadgeWidth = ctx.measureText(modelText).width + 8;
+            const modelBadgeHeight = 20;
+            
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(
+                x + width - modelBadgeWidth,
+                y,
+                modelBadgeWidth,
+                modelBadgeHeight,
+                5
+              );
+            } else {
+              ctx.fillRect(
+                x + width - modelBadgeWidth,
+                y,
+                modelBadgeWidth,
+                modelBadgeHeight
+              );
+            }
+            ctx.fill();
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 12px Arial';
+            ctx.fillText(
+              modelText,
+              x + width - modelBadgeWidth + 4,
+              y + 15
+            );
           });
         } catch (error) {
           console.error("Erreur pendant le traitement des prédictions:", error);
+          addLog(`Erreur de traitement: ${error.message}`, "error");
         }
       };
 
@@ -748,11 +912,12 @@ const Analyse = () => {
       }
     } catch (error) {
       console.error("Erreur pendant la détection:", error);
+      addLog(`Erreur de détection: ${error.message}`, "error");
     }
 
     // Boucle de détection continue avec requestAnimationFrame pour meilleures performances
     animationFrameRef.current = requestAnimationFrame(detectFrame);
-  }, [isDetecting, selectedObject, zoomLevel, brightness, detectionInterval, generateSceneDescription]);
+  }, [isDetecting, selectedObject, zoomLevel, brightness, detectionInterval, generateSceneDescription, addLog]);
 
   // Démarrer la détection une fois le modèle chargé
   useEffect(() => {
@@ -782,6 +947,7 @@ const Analyse = () => {
         setCapturedImage(imageSrc);
         setIsDetecting(false);
         speechManagerRef.current.speak("Photo capturée", 2);
+        addLog("Photo capturée pour analyse", "info");
       }
     }
   };
@@ -794,6 +960,7 @@ const Analyse = () => {
 
     try {
       speechManagerRef.current.speak("Analyse de l'image en cours", 2);
+      addLog("Démarrage de l'analyse d'image", "info");
       
       const img = new Image();
       img.crossOrigin = "anonymous"; // Évite les erreurs CORS
@@ -809,8 +976,12 @@ const Analyse = () => {
       const imgTensor = tf.browser.fromPixels(img);
       
       // COCO-SSD predictions
+      const startTime = performance.now();
       const cocoPredictions = await modelRef.current.cocoModel.detect(imgTensor);
+      const cocoTime = performance.now() - startTime;
+      
       allPredictions = [...cocoPredictions];
+      addLog(`COCO-SSD: ${cocoPredictions.length} objets en ${cocoTime.toFixed(0)}ms`, "performance");
       
       // Libérer le tenseur image après l'analyse COCO
       imgTensor.dispose();
@@ -818,6 +989,7 @@ const Analyse = () => {
       // YOLO predictions si disponibles
       if (modelRef.current.yoloModel) {
         try {
+          const yoloStartTime = performance.now();
           const inputTensor = tf.browser.fromPixels(img)
             .resizeNearestNeighbor([640, 640])
             .expandDims()
@@ -838,6 +1010,7 @@ const Analyse = () => {
           }
           
           const yoloRawPredictions = yoloData[0];
+          let yoloDetectionCount = 0;
 
           // Convertir les prédictions YOLO au format compatible
           for (let i = 0; i < yoloRawPredictions.length; i++) {
@@ -853,15 +1026,34 @@ const Analyse = () => {
                 class: `custom-${Math.round(classId)}`, 
                 score
               });
+              yoloDetectionCount++;
             }
           }
+          
+          const yoloTime = performance.now() - yoloStartTime;
+          addLog(`YOLO: ${yoloDetectionCount} objets en ${yoloTime.toFixed(0)}ms`, "performance");
         } catch (yoloError) {
           console.error("Erreur lors de l'inférence YOLO sur image:", yoloError);
+          addLog(`Erreur YOLO: ${yoloError.message}`, "error");
         }
       }
 
       const enhancedPredictions = enrichPredictions(allPredictions.filter(p => p.score > 0.5));
       setPredictions(enhancedPredictions);
+      
+      // Ajouter les objets détectés aux analyses
+      const newAnalyses = {};
+      enhancedPredictions.forEach(pred => {
+        const objectId = `${pred.class}-${Math.random().toString(36).substring(2, 7)}`;
+        newAnalyses[objectId] = {
+          ...pred,
+          analyseComplete: analyserDimensionsObjets(pred, img.width, img.height),
+          horodatage: new Date().toISOString()
+        };
+      });
+      setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
+      
+      addLog(`Analyse complète: ${enhancedPredictions.length} objets identifiés`, "success");
 
       // Dessiner l'image et les détections sur le canvas
       const canvas = canvasRef.current;
@@ -877,12 +1069,12 @@ const Analyse = () => {
       enhancedPredictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
 
-        ctx.strokeStyle = '#00FFFF';
+        ctx.strokeStyle = prediction.source === 'YOLO' ? '#36BBFF' : '#00FFFF';
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
         ctx.strokeRect(x, y, width, height);
 
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillStyle = prediction.source === 'YOLO' ? 'rgba(54, 187, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(x, y > 20 ? y - 25 : y + height, width, 25);
 
         ctx.fillStyle = '#FFFFFF';
@@ -892,6 +1084,16 @@ const Analyse = () => {
           x + 5,
           y > 20 ? y - 7 : y + height + 18
         );
+        
+        // Badge du modèle
+        const modelText = prediction.source || "IA";
+        ctx.fillStyle = prediction.source === 'YOLO' ? 'rgba(0, 100, 200, 0.9)' : 'rgba(50, 50, 50, 0.9)';
+        const modelBadgeWidth = ctx.measureText(modelText).width + 8;
+        ctx.fillRect(x + width - modelBadgeWidth, y, modelBadgeWidth, 20);
+        
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 12px Arial';
+        ctx.fillText(modelText, x + width - modelBadgeWidth + 4, y + 15);
       });
       
       // Résumé audio des objets détectés
@@ -903,16 +1105,19 @@ const Analyse = () => {
         speechManagerRef.current.speak(objectsText, 2);
       } else {
         speechManagerRef.current.speak("Aucun objet n'a été détecté dans cette image", 2);
+        addLog("Aucun objet détecté dans l'image", "warning");
       }
     } catch (error) {
       console.error("Erreur lors de l'analyse de l'image:", error);
       setErrorMessage("Erreur lors de l'analyse de l'image");
+      addLog(`Erreur d'analyse: ${error.message}`, "error");
       speechManagerRef.current.speak("Erreur lors de l'analyse de l'image", 3);
     } finally {
       // Forcer un collecteur de mémoire pour libérer les ressources
       tf.engine().endScope();
       if (tf.memory().numTensors > 0) {
         console.log(`Tenseurs restants: ${tf.memory().numTensors}`);
+        addLog(`Nettoyage mémoire: ${tf.memory().numTensors} tenseurs libérés`, "system");
         tf.disposeVariables();
       }
     }
@@ -925,6 +1130,7 @@ const Analyse = () => {
     setCapturedImage(null);
     setIsDetecting(true);
     speechManagerRef.current.speak("Retour au mode de détection en direct", 2);
+    addLog("Retour au mode de détection en direct", "info");
   };
 
   /**
@@ -934,6 +1140,7 @@ const Analyse = () => {
     const newMode = cameraFacingMode === "user" ? "environment" : "user";
     setCameraFacingMode(newMode);
     speechManagerRef.current.speak(`Caméra ${newMode === "user" ? "avant" : "arrière"} activée`, 2);
+    addLog(`Changement de caméra: ${newMode === "user" ? "avant" : "arrière"}`, "info");
   };
   
   /**
@@ -944,6 +1151,11 @@ const Analyse = () => {
     
     // Construire une description complète basée sur toutes les informations disponibles
     let description = `${object.class} détecté avec ${Math.round(object.score * 100)}% de certitude. `;
+    
+    // Ajouter l'origine du modèle
+    if (object.source) {
+      description += `Détecté par le modèle ${object.source}. `;
+    }
     
     // Ajouter des informations sur les caractéristiques si disponibles
     if (object.caracteristiques && object.caracteristiques !== "Informations non disponibles dans notre base de connaissances.") {
@@ -967,6 +1179,23 @@ const Analyse = () => {
     }
     
     speechManagerRef.current.speak(description, 3);
+    addLog(`Description verbale: ${object.class}`, "info");
+  };
+  
+  /**
+   * Afficher ou masquer la boîte de logs
+   */
+  const toggleAiLogs = () => {
+    setShowAiLogs(prev => !prev);
+    addLog("Affichage des logs " + (showAiLogs ? "désactivé" : "activé"), "system");
+  };
+  
+  /**
+   * Effacer les logs d'IA
+   */
+  const clearAiLogs = () => {
+    setAiLogs([]);
+    addLog("Logs effacés", "system");
   };
 
   return (
@@ -1022,6 +1251,7 @@ const Analyse = () => {
                   style={{ filter: `brightness(${brightness}%)`, transform: `scale(${zoomLevel})` }}
                   onLoadedMetadata={() => {
                     console.log("Caméra initialisée");
+                    addLog("Caméra initialisée", "success");
                     // Précharger l'audio pour réduire la latence
                     if (audioEnabled) {
                       speechManagerRef.current.initialize();
@@ -1057,6 +1287,11 @@ const Analyse = () => {
                     <div className="object-title">
                       <span className="object-icon" aria-hidden="true">{selectedObject.icon}</span>
                       <h3 id="object-detail-title">{selectedObject.class}</h3>
+                      {selectedObject.source && (
+                        <span className={`model-badge ${selectedObject.source.toLowerCase()}`}>
+                          {selectedObject.source}
+                        </span>
+                      )}
                     </div>
                     <button
                       className="close-btn"
@@ -1152,6 +1387,13 @@ const Analyse = () => {
                       <h4>Conseil</h4>
                       <p>{selectedObject.conseil}</p>
                     </div>
+                    
+                    <div className="detail-section">
+                      <h4>Informations techniques</h4>
+                      <p><strong>Source:</strong> {selectedObject.source || "Modèle standard"}</p>
+                      <p><strong>Détecté à:</strong> {new Date(selectedObject.detectedAt).toLocaleString()}</p>
+                      <p><strong>Certitude:</strong> {selectedObject.certainty}</p>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -1212,6 +1454,16 @@ const Analyse = () => {
               {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />}
             </motion.button>
 
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              className="tool-button"
+              onClick={toggleAiLogs}
+              title={showAiLogs ? "Masquer les logs IA" : "Afficher les logs IA"}
+              aria-label={showAiLogs ? "Masquer les logs IA" : "Afficher les logs IA"}
+            >
+              <FaRobot />
+            </motion.button>
+
             <label className="tool-button" title="Charger une image" aria-label="Charger une image">
               <MdPhotoLibrary />
               <input
@@ -1225,6 +1477,7 @@ const Analyse = () => {
                     reader.onloadend = () => {
                       setCapturedImage(reader.result);
                       setIsDetecting(false);
+                      addLog(`Image chargée: ${file.name}`, "info");
                       // Utiliser setTimeout pour s'assurer que l'état est mis à jour
                       setTimeout(() => analyzeImage(), 100);
                     };
@@ -1258,6 +1511,7 @@ const Analyse = () => {
                   link.click();
                   document.body.removeChild(link);
                   speechManagerRef.current.speak("Image sauvegardée dans votre galerie", 2);
+                  addLog("Image sauvegardée", "success");
                 }}
                 className="control-button"
                 aria-label="Sauvegarder l'image"
@@ -1266,8 +1520,302 @@ const Analyse = () => {
               </motion.button>
             </div>
           )}
+          {/* Logs d'IA */}
+          <AnimatePresence>
+            {showAiLogs && (
+              <motion.div 
+                className="ai-logs-container"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="ai-logs-header">
+                  <h3>
+                    <FaBrain className="logs-icon" /> 
+                    Logs d'IA
+                  </h3>
+                  <div className="log-controls">
+                    <button onClick={clearAiLogs} className="clear-logs-btn" title="Effacer les logs">
+                      Effacer
+                    </button>
+                    <button onClick={toggleAiLogs} className="close-logs-btn" title="Fermer les logs">
+                      Fermer
+                    </button>
+                  </div>
+                </div>
+                <div className="ai-logs-content">
+                  {aiLogs.length === 0 ? (
+                    <p className="no-logs">Aucun log pour le moment</p>
+                  ) : (
+                    aiLogs.map((log, i) => (
+                      <div key={i} className={`log-entry ${log.type}`}>
+                        <span className="log-time">{log.timestamp}</span>
+                        <span className="log-message">{log.message}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Liste des objets détectés */}
+        <div className="detection-results" role="complementary" aria-label="Liste des objets détectés">
+          <AnimatePresence>
+            <motion.div 
+              className="results-container"
+              initial={{ opacity: 0, x: 50 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="results-header">
+                <h2 className="results-title">Objets Détectés</h2>
+                <div className="detection-mode-controls">
+                  <select
+                    value={detectionMode}
+                    onChange={(e) => setDetectionMode(e.target.value)}
+                    className="detection-mode-select"
+                    title="Mode de détection"
+                    aria-label="Sélectionner le mode de détection"
+                  >
+                    <option value="fast">Mode rapide</option>
+                    <option value="normal">Mode équilibré</option>
+                    <option value="detail">Mode détaillé</option>
+                  </select>
+                  <button 
+                    onClick={() => setDarkMode(prev => !prev)}
+                    className="theme-toggle-button"
+                    aria-label={darkMode ? "Activer le mode clair" : "Activer le mode sombre"}
+                  >
+                    {darkMode ? "☀️" : "🌙"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="results-content">
+                {predictions.length === 0 ? (
+                  <div className="no-detections">
+                    <MdOutlineInfo size={48} className="no-detect-icon" />
+                    <p>Aucun objet détecté pour le moment</p>
+                    <p className="hint">Dirigez la caméra vers un objet...</p>
+                  </div>
+                ) : (
+                  <motion.ul className="detection-list">
+                    <AnimatePresence>
+                      {predictions.map((prediction, index) => (
+                        <motion.li
+                          key={`${prediction.class}-${index}`}
+                          className={`detection-item ${selectedObject && selectedObject.class === prediction.class ? 'selected' : ''}`}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, x: -50 }}
+                          transition={{ duration: 0.3, delay: index * 0.05 }}
+                          whileHover={{ scale: 1.02 }}
+                          onClick={() => setSelectedObject(prediction)}
+                        >
+                          <div className="detection-icon">{prediction.icon}</div>
+                          <div className="detection-info">
+                            <div className="detection-top">
+                              <h3 className="detection-name">{prediction.class}</h3>
+                              {prediction.source && (
+                                <span className={`model-badge small ${prediction.source.toLowerCase()}`}>
+                                  {prediction.source}
+                                </span>
+                              )}
+                            </div>
+                            <div className="detection-confidence">
+                              <div className="confidence-bar">
+                                <div 
+                                  className="confidence-level" 
+                                  style={{ 
+                                    width: `${prediction.score * 100}%`,
+                                    backgroundColor:
+                                      prediction.score > 0.7
+                                        ? '#4CAF50'
+                                        : prediction.score > 0.5
+                                          ? '#FFC107'
+                                          : '#F44336'
+                                  }}
+                                ></div>
+                              </div>
+                              <span className="confidence-value">{(prediction.score * 100).toFixed(0)}%</span>
+                            </div>
+                            <p className="detection-category">
+                              {prediction.categories[0] !== "non classifié" 
+                                ? prediction.categories[0]
+                                : "Catégorie non définie"}
+                            </p>
+                          </div>
+                        </motion.li>
+                      ))}
+                    </AnimatePresence>
+                  </motion.ul>
+                )}
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
+
+      {/* Menu de paramètres */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div
+            className="settings-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowSettings(false)}
+          >
+            <motion.div
+              className="settings-panel"
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              onClick={e => e.stopPropagation()}
+              role="dialog"
+              aria-labelledby="settings-title"
+              aria-modal="true"
+            >
+              <div className="settings-header">
+                <h2 id="settings-title">Paramètres</h2>
+                <button 
+                  onClick={() => setShowSettings(false)}
+                  className="close-settings"
+                  aria-label="Fermer les paramètres"
+                >×</button>
+              </div>
+
+              <div className="settings-body">
+                <div className="settings-section">
+                  <h3>Apparence</h3>
+                  <div className="settings-option">
+                    <span>Mode sombre</span>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={darkMode}
+                        onChange={() => setDarkMode(prev => !prev)}
+                        aria-label="Activer le mode sombre"
+                      />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
+                  
+                  <div className="settings-option">
+                    <span>Luminosité</span>
+                    <div className="settings-slider">
+                      <input
+                        type="range"
+                        min="50"
+                        max="150"
+                        value={brightness}
+                        onChange={e => setBrightness(parseInt(e.target.value))}
+                        aria-label="Ajuster la luminosité"
+                      />
+                      <span>{brightness}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <h3>Détection</h3>
+                  <div className="settings-option">
+                    <span>Mode de détection</span>
+                    <select
+                      value={detectionMode}
+                      onChange={e => setDetectionMode(e.target.value)}
+                      aria-label="Sélectionner le mode de détection"
+                    >
+                      <option value="fast">Rapide (performance)</option>
+                      <option value="normal">Équilibré</option>
+                      <option value="detail">Détaillé (précision)</option>
+                    </select>
+                  </div>
+
+                  <div className="settings-option">
+                    <span>Audio descriptif</span>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={audioEnabled}
+                        onChange={() => setAudioEnabled(prev => !prev)}
+                        aria-label="Activer l'audio descriptif"
+                      />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <h3>Avancé</h3>
+                  <div className="settings-option">
+                    <span>Analyse cloud (expérimental)</span>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={enableCloudAnalysis}
+                        onChange={() => setEnableCloudAnalysis(prev => !prev)}
+                        aria-label="Activer l'analyse cloud"
+                      />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
+                  
+                  <div className="settings-option">
+                    <span>Modèle YOLO personnalisé</span>
+                    <div className="model-status">
+                      {modelRef.current?.customModelLoaded ? (
+                        <span className="status-active">Actif</span>
+                      ) : (
+                        <span className="status-inactive">Non disponible</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="settings-option">
+                    <span>Afficher les logs IA</span>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={showAiLogs}
+                        onChange={toggleAiLogs}
+                        aria-label="Afficher les logs d'IA"
+                      />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="settings-info">
+                  <p>
+                    Modèle IA: {modelRef.current?.customModelLoaded ? 'COCO-SSD & YOLO personnalisé' : 'COCO-SSD'}
+                    <br />
+                    Version: 1.0.0
+                    <br />
+                    <small>
+                      Powered by TensorFlow.js - {tf.getBackend ? tf.getBackend() : 'webgl'} backend
+                    </small>
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bouton flottant pour les paramètres */}
+      <motion.button
+        className="settings-button"
+        whileTap={{ scale: 0.9 }}
+        onClick={() => setShowSettings(true)}
+        title="Paramètres"
+        aria-label="Ouvrir les paramètres"
+      >
+        <FaCog size={24} />
+      </motion.button>
     </div>
   );
 };
