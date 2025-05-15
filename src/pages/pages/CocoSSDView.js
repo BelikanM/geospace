@@ -113,7 +113,7 @@ const analyserDimensionsObjets = (prediction, videoWidth, videoHeight) => {
 };
 
 /**
- * Gestion intelligente des commentaires vocaux avec contrôle des délais
+ * Gestion intelligente des commentaires vocaux
  */
 class SpeechManager {
   constructor() {
@@ -122,22 +122,6 @@ class SpeechManager {
     this.lastMessages = {};
     this.cooldowns = {};
     this.enabled = true;
-    this.audioContext = null;
-    // Pour la synchronisation audio-vidéo
-    this.lastFrameTime = 0;
-    this.frameDelayThreshold = 30; // ms
-  }
-
-  // Initialisation du contexte audio pour une meilleure synchronisation
-  initialize() {
-    try {
-      // Créer un contexte audio seulement si le navigateur le supporte
-      if (window.AudioContext || window.webkitAudioContext) {
-        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      }
-    } catch (error) {
-      console.error("Impossible d'initialiser l'AudioContext:", error);
-    }
   }
 
   setEnabled(enabled) {
@@ -153,21 +137,9 @@ class SpeechManager {
     this.speaking = false;
   }
 
-  // Utiliser cette méthode pour ajouter un message à la file d'attente avec contrôle de synchronisation
-  speak(text, priority = 1, objectId = null, frameTime = null) {
+  // Utiliser cette méthode pour ajouter un message à la file d'attente
+  speak(text, priority = 1, objectId = null) {
     if (!this.enabled) return;
-    
-    // Mise à jour du timestamp de frame pour synchronisation
-    if (frameTime) {
-      const frameDelay = frameTime - this.lastFrameTime;
-      this.lastFrameTime = frameTime;
-      
-      // Si le délai entre frames est trop grand, on vide la file d'attente
-      // pour éviter des commentaires obsolètes
-      if (frameDelay > this.frameDelayThreshold && this.queue.length > 0) {
-        this.queue = this.queue.filter(item => item.priority >= 3); // Garder uniquement les messages prioritaires
-      }
-    }
     
     // Éviter les messages répétés trop fréquemment pour le même objet
     if (objectId) {
@@ -195,21 +167,10 @@ class SpeechManager {
       this.queue.splice(insertIndex, 0, message);
     }
     
-    // Limiter la taille de la file pour éviter accumulation
-    if (this.queue.length > 5) {
-      // Garder les messages prioritaires et les plus récents
-      this.queue = this.queue.sort((a, b) => {
-        // D'abord par priorité (décroissante)
-        if (b.priority !== a.priority) return b.priority - a.priority;
-        // Puis par timestamp (croissant - plus récent)
-        return b.timestamp - a.timestamp;
-      }).slice(0, 5);
-    }
-    
     this.processQueue();
   }
 
-  // Traite la file de messages avec synchronisation améliorée
+  // Traite la file de messages
   processQueue() {
     if (this.speaking || this.queue.length === 0) return;
     
@@ -220,43 +181,13 @@ class SpeechManager {
     utterance.lang = 'fr-FR';
     utterance.rate = 1.1; // Légèrement plus rapide pour une expérience plus fluide
     
-    // Préparer la synthèse en avance pour réduire la latence
-    if (this.audioContext) {
-      // Créer un petit son silencieux pour débloquer l'audio si nécessaire
-      const oscillator = this.audioContext.createOscillator();
-      const gainNode = this.audioContext.createGain();
-      gainNode.gain.value = 0; // Volume à zéro (silencieux)
-      oscillator.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
-      oscillator.start();
-      oscillator.stop(this.audioContext.currentTime + 0.001);
-    }
-    
     utterance.onend = () => {
       this.speaking = false;
       // Attendre un court instant avant de traiter le message suivant
-      setTimeout(() => this.processQueue(), 200);
-    };
-    
-    // Gestion des erreurs de synthèse vocale
-    utterance.onerror = (event) => {
-      console.error("Erreur de synthèse vocale:", event);
-      this.speaking = false;
-      setTimeout(() => this.processQueue(), 200);
+      setTimeout(() => this.processQueue(), 300);
     };
     
     window.speechSynthesis.speak(utterance);
-    
-    // Vérifier après un délai si la synthèse a commencé
-    // Si non, on force la réinitialisation pour éviter le blocage
-    setTimeout(() => {
-      if (this.speaking && window.speechSynthesis.pending) {
-        console.warn("Synthèse vocale bloquée, réinitialisation...");
-        window.speechSynthesis.cancel();
-        this.speaking = false;
-        setTimeout(() => this.processQueue(), 500);
-      }
-    }, 1000);
   }
 }
 
@@ -269,7 +200,6 @@ const Analyse = () => {
   const canvasRef = useRef(null);
   const modelRef = useRef(null);
   const speechManagerRef = useRef(new SpeechManager());
-  const animationFrameRef = useRef(null);
 
   // États
   const [predictions, setPredictions] = useState([]);
@@ -306,37 +236,11 @@ const Analyse = () => {
     speechManagerRef.current.setEnabled(audioEnabled);
   }, [audioEnabled]);
 
-  // Initialiser le gestionnaire audio au démarrage
-  useEffect(() => {
-    speechManagerRef.current.initialize();
-    
-    // Nettoyer l'animation frame à la fermeture pour éviter les fuites mémoire
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-      speechManagerRef.current.cancel();
-    };
-  }, []);
-
-  // Optimisation du chargement des modèles et configuration TensorFlow
+  // Charger le JSON puis le modèle - CORRIGÉ pour éviter la redéclaration de cocoModel
   useEffect(() => {
     const loadModelsAndData = async () => {
       try {
         setLoadingModel(true);
-        
-        // Configuration TensorFlow optimisée pour GPU
-        await tf.ready();
-        
-        // Optimisation de la mémoire GPU/WebGL - valeurs à ajuster selon les performances
-        tf.env().set('WEBGL_FLUSH_THRESHOLD', 2); // Réduire pour économiser la mémoire GPU
-        tf.env().set('WEBGL_FORCE_F16_TEXTURES', true); // Utiliser des textures 16-bit pour économiser la mémoire
-        tf.env().set('WEBGL_PACK', true); // Activer le packing pour optimiser les calculs
-        tf.env().set('WEBGL_LAZILY_UNPACK', true); // Décompresser paresseusement quand nécessaire
-        
-        // Activer WebGL explicitement
-        await tf.setBackend('webgl');
-        console.log("Backend TensorFlow.js:", tf.getBackend());
         
         // Chargement dynamique du fichier JSON avec les données des objets
         console.log("Chargement des données des objets...");
@@ -344,43 +248,43 @@ const Analyse = () => {
         objetInfos = module.default;
         console.log("Données des objets chargées");
         
-        // Chargement des modèles en parallèle
+        // Assurer que TensorFlow.js utilise WebGL
+        await tf.setBackend('webgl');
+        console.log("Backend TensorFlow.js:", tf.getBackend());
+        
+        // SECTION CORRIGÉE: Chargement des modèles sans redéclaration
+        // Charger COCO-SSD et YOLO en une seule fois
         console.log("Chargement des modèles d'IA...");
         
-        const modelPromises = [
-          cocoSsd.load({
-            base: detectionMode === "fast" ? "lite_mobilenet_v2" : "mobilenet_v2"
-          })
-        ];
-        
-        // Ajouter le chargement YOLO à la liste des promesses
+        // Chargement du modèle COCO-SSD
+        const cocoSsdModel = await cocoSsd.load({
+          base: detectionMode === "fast" ? "lite_mobilenet_v2" : "mobilenet_v2"
+        });
+        console.log("Modèle COCO-SSD chargé");
+
+        // Chargement du modèle YOLO
+        let yoloModel = null;
         try {
-          modelPromises.push(tf.loadGraphModel('/models/lifemodo_tfjs/model.json'));
-        } catch (error) {
-          console.log("Modèle YOLO non disponible, continuer sans lui");
+          console.log("Chargement du modèle YOLO personnalisé...");
+          yoloModel = await tf.loadGraphModel('/models/lifemodo_tfjs/model.json');
+          console.log("Modèle YOLO chargé avec succès");
+        } catch (yoloError) {
+          console.error("Erreur lors du chargement du modèle YOLO:", yoloError);
+          // Continuer même si YOLO échoue
         }
-        
-        // Attendre que tous les modèles soient chargés
-        const loadedModels = await Promise.allSettled(modelPromises);
-        
+
         // Stocker les modèles dans la référence
         modelRef.current = {
-          cocoModel: loadedModels[0].status === 'fulfilled' ? loadedModels[0].value : null,
-          yoloModel: loadedModels.length > 1 && loadedModels[1].status === 'fulfilled' ? loadedModels[1].value : null,
-          customModelLoaded: loadedModels.length > 1 && loadedModels[1].status === 'fulfilled',
+          cocoModel: cocoSsdModel,  // Remarquez le nom différent pour éviter la redéclaration
+          yoloModel,
+          customModelLoaded: !!yoloModel,
           createdAt: new Date()
         };
         
-        if (!modelRef.current.cocoModel) {
-          throw new Error("Impossible de charger le modèle COCO-SSD");
-        }
-        
         setLoadingModel(false);
         
-        // Message de bienvenue avec délai pour assurer la disponibilité audio
-        setTimeout(() => {
-          speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi", 3);
-        }, 500);
+        // Message de bienvenue
+        speechManagerRef.current.speak("Système d'analyse d'objets prêt à l'emploi", 3);
       } catch (error) {
         console.error("Erreur lors du chargement:", error);
         setErrorMessage(`Impossible de charger les données ou les modèles d'IA. ${error.message || "Veuillez vérifier votre connexion internet et recharger l'application."}`);
@@ -394,24 +298,13 @@ const Analyse = () => {
       // Nettoyage à la fermeture
       speechManagerRef.current.cancel();
       console.log("Nettoyage des ressources...");
-      // Libérer explicitement la mémoire TensorFlow
-      if (tf.getBackend() === 'webgl') {
-        // @ts-ignore
-        const gl = tf.backend().getGPGPUContext().gl;
-        if (gl && typeof gl.getExtension === 'function') {
-          // Forcer la libération des ressources WebGL
-          const loseContextExt = gl.getExtension('WEBGL_lose_context');
-          if (loseContextExt) loseContextExt.loseContext();
-        }
-      }
     };
   }, [detectionMode]);
   
   /**
-   * Génère une description de la scène à partir des objets détectés,
-   * optimisée pour la synchronisation
+   * Génère une description de la scène à partir des objets détectés
    */
-  const generateSceneDescription = useCallback((enhancedPredictions, newSceneDetected, frameTime) => {
+  const generateSceneDescription = useCallback((enhancedPredictions, newSceneDetected) => {
     if (!audioEnabled || enhancedPredictions.length === 0) return;
     
     const now = Date.now();
@@ -471,7 +364,7 @@ const Analyse = () => {
         
         // Parler avec une priorité basée sur la confiance et la nouveauté
         const priority = isNewObject ? 2 : 1;
-        speechManagerRef.current.speak(description, priority, objectId, frameTime);
+        speechManagerRef.current.speak(description, priority, objectId);
         
         // Mettre à jour quand cet objet a été décrit pour la dernière fois
         objectHistory.lastDescribed = now;
@@ -494,7 +387,7 @@ const Analyse = () => {
         // Ne pas répéter la même description
         if (sceneDesc !== lastSceneDescription) {
           setLastSceneDescription(sceneDesc);
-          speechManagerRef.current.speak(sceneDesc, 1.5, null, frameTime);
+          speechManagerRef.current.speak(sceneDesc, 1.5);
           lastDescriptionTimeRef.current = now;
         }
       }
@@ -503,7 +396,6 @@ const Analyse = () => {
   
   /**
    * Fonction principale de détection d'objets et dessin
-   * Optimisée pour la performance et la synchronisation
    */
   const detectFrame = useCallback(async () => {
     // Vérification des prérequis
@@ -513,14 +405,14 @@ const Analyse = () => {
       !webcamRef.current?.video || 
       webcamRef.current.video.readyState !== 4
     ) {
-      animationFrameRef.current = requestAnimationFrame(detectFrame);
+      requestAnimationFrame(detectFrame);
       return;
     }
 
     // Limiter la fréquence de détection
     const now = performance.now();
     if (now - lastDetectionTimeRef.current < detectionInterval) {
-      animationFrameRef.current = requestAnimationFrame(detectFrame);
+      requestAnimationFrame(detectFrame);
       return;
     }
     lastDetectionTimeRef.current = now;
@@ -530,7 +422,7 @@ const Analyse = () => {
       const canvas = canvasRef.current;
       
       if (!canvas) {
-        animationFrameRef.current = requestAnimationFrame(detectFrame);
+        requestAnimationFrame(detectFrame);
         return;
       }
       
@@ -540,236 +432,202 @@ const Analyse = () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
-      // Capture du timestamp pour synchronisation
-      const frameTimestamp = performance.now();
-
-      // Traitement des prédictions dans une fonction séparée pour permettre
-      // l'utilisation de async/await sans bloquer le rendu
-      const processPredictions = async () => {
-        try {
-          // Création directe d'un tenseur à partir de la vidéo pour optimiser
-          const videoTensor = tf.browser.fromPixels(video);
-          
-          // Obtenir les prédictions COCO-SSD
-          const cocoPredictions = await modelRef.current.cocoModel.detect(videoTensor);
-          
-          // Libérer le tenseur après utilisation
-          videoTensor.dispose();
-          
-          // Tableau pour stocker toutes les prédictions
-          let allPredictions = [...cocoPredictions];
-    
-          // Ajouter les prédictions YOLO si le modèle est disponible
-          if (modelRef.current.yoloModel) {
-            try {
-              // Préparation de l'entrée pour YOLO
-              const inputTensor = tf.browser.fromPixels(video)
-                .resizeNearestNeighbor([640, 640])
-                .expandDims()
-                .div(255.0);
-    
-              // Exécuter l'inférence YOLO
-              const yoloOutput = await modelRef.current.yoloModel.executeAsync(inputTensor);
-              
-              // Nettoyer le tenseur d'entrée pour éviter les fuites mémoire
-              inputTensor.dispose();
-              
-              // Traiter la sortie du modèle YOLO
-              const yoloData = await yoloOutput[0].array();
-              
-              // S'assurer que yoloOutput est bien un tableau et dispose tous les tenseurs
-              if (Array.isArray(yoloOutput)) {
-                yoloOutput.forEach(tensor => tensor.dispose());
-              } else {
-                yoloOutput.dispose();
-              }
-              
-              // Récupérer les prédictions brutes
-              const yoloRawPredictions = yoloData[0];
-              
-              // Convertir les prédictions YOLO au format compatible
-              for (let i = 0; i < yoloRawPredictions.length; i++) {
-                const [x, y, w, h, score, classId] = yoloRawPredictions[i];
-                
-                // Ne garder que les prédictions avec un score suffisant
-                if (score > 0.5) {
-                  // Convertir au format attendu par le reste du code
-                  allPredictions.push({
-                    bbox: [
-                      (x - w/2) * video.videoWidth, 
-                      (y - h/2) * video.videoHeight,
-                      w * video.videoWidth, 
-                      h * video.videoHeight
-                    ],
-                    class: `custom-${Math.round(classId)}`, 
-                    score
-                  });
-                }
-              }
-            } catch (yoloError) {
-              console.error("Erreur lors de l'inférence YOLO:", yoloError);
-              // Continuer avec seulement les prédictions COCO-SSD en cas d'erreur
-            }
-          }
-          
-          // Filtrer par seuil de confiance et trier
-          const filteredPredictions = allPredictions
-            .filter(prediction => prediction.score > 0.35)
-            .sort((a, b) => b.score - a.score);
-            
-          // Enrichir les prédictions
-          const enhancedPredictions = enrichPredictions(filteredPredictions);
-          
-          // Vérifier si changement significatif
-          const lastPredClasses = lastPredictionsRef.current
-            .map(p => `${p.class}-${p.score.toFixed(2)}`)
-            .sort()
-            .join(',');
-            
-          const newPredClasses = enhancedPredictions
-            .map(p => `${p.class}-${p.score.toFixed(2)}`)
-            .sort()
-            .join(',');
-          
-          // Détecter si la scène a changé significativement
-          const isNewScene = lastPredClasses.split(',').length !== newPredClasses.split(',').length || 
-            (lastPredClasses.length > 0 && 
-             newPredClasses.length > 0 && 
-             !lastPredClasses.includes(newPredClasses.split(',')[0]));
-          
-          if (lastPredClasses !== newPredClasses) {
-            // Mise à jour des états
-            setPredictions(enhancedPredictions);
-            lastPredictionsRef.current = enhancedPredictions;
-            
-            // Analyser les dimensions des objets
-            const newAnalyses = {};
-            enhancedPredictions.forEach(pred => {
-              const objectId = `${pred.class}-${Math.random().toString(36).substring(2, 7)}`;
-              newAnalyses[objectId] = {
-                ...pred,
-                analyseComplete: analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight),
-                horodatage: new Date().toISOString()
-              };
-            });
-            
-            setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
-            // Générer des descriptions audio des objets détectés avec le timestamp pour synchronisation
-            generateSceneDescription(enhancedPredictions, isNewScene, frameTimestamp);
-          }
-
-          // Nettoyer le canvas pour le nouveau rendu
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          
-          // Appliquer les filtres visuels si nécessaire
-          if (brightness !== 100 || zoomLevel !== 1) {
-            ctx.filter = `brightness(${brightness}%)`;
-            ctx.save();
-
-            if (zoomLevel !== 1) {
-              ctx.translate(canvas.width / 2, canvas.height / 2);
-              ctx.scale(zoomLevel, zoomLevel);
-              ctx.translate(-canvas.width / 2, -canvas.height / 2);
-            }
-            
-            // Dessiner la vidéo avec filtres
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            ctx.restore();
-            ctx.filter = 'none';
-          }
-          
-          // Dessiner les rectangles et étiquettes des objets détectés
-          enhancedPredictions.forEach(prediction => {
-            const [x, y, width, height] = prediction.bbox;
-            const isSelected = selectedObject && selectedObject.class === prediction.class;
-
-            // Style du rectangle
-            ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
-            ctx.lineWidth = isSelected ? 4 : 2;
-            ctx.lineJoin = 'round';
-
-            // Dessiner le rectangle (avec arrondis si disponible)
-            if (typeof ctx.roundRect === 'function') {
-              ctx.beginPath();
-              ctx.roundRect(x, y, width, height, 5);
-              ctx.stroke();
-            } else {
-              ctx.strokeRect(x, y, width, height);
-            }
-
-            // Créer étiquette avec info-bulle pour chaque objet détecté
-            const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
-            const textWidth = ctx.measureText(text).width + 20;
-            const bubbleHeight = 30;
-
-            ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
-
-            // Créer bulle d'arrière-plan pour le texte
-            ctx.beginPath();
-            if (typeof ctx.roundRect === 'function') {
-              ctx.roundRect(
-                x - 5,
-                y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
-                textWidth,
-                bubbleHeight,
-                5
-              );
-            } else {
-              ctx.fillRect(
-                x - 5,
-                y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
-                textWidth,
-                bubbleHeight
-              );
-            }
-            ctx.fill();
-
-            // Ajouter le texte de l'étiquette
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = 'bold 16px Arial';
-            ctx.fillText(
-              text,
-              x + 5,
-              y > bubbleHeight + 10 ? y - bubbleHeight / 2 - 5 : y + height + bubbleHeight / 2 + 5
-            );
-          });
-        } catch (error) {
-          console.error("Erreur pendant le traitement des prédictions:", error);
-        }
-      };
-
-      // Lancer le traitement des prédictions
-      processPredictions();
+      // SECTION CORRIGÉE pour fusionner les prédictions COCO-SSD et YOLO sans erreurs
+      // Obtenir les prédictions COCO-SSD
+      const cocoPredictions = await modelRef.current.cocoModel.detect(video, 10);
       
-      // Dessiner la vidéo directement (sans attendre les prédictions) pour plus de fluidité
-      // si les filtres ne sont pas appliqués
-      if (brightness === 100 && zoomLevel === 1) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // Tableau pour stocker toutes les prédictions
+      let allPredictions = [...cocoPredictions];
+
+      // Ajouter les prédictions YOLO si le modèle est disponible
+      if (modelRef.current.yoloModel) {
+        try {
+          // Préparation de l'entrée pour YOLO
+          const inputTensor = tf.browser.fromPixels(video)
+            .resizeNearestNeighbor([640, 640])
+            .expandDims()
+            .div(255.0);
+
+          // Exécuter l'inférence YOLO
+          const yoloOutput = await modelRef.current.yoloModel.executeAsync(inputTensor);
+          
+          // Nettoyer le tenseur d'entrée pour éviter les fuites mémoire
+          inputTensor.dispose();
+          
+          // Traiter la sortie du modèle YOLO
+          const yoloData = await yoloOutput[0].array();
+          
+          // S'assurer que yoloOutput est bien un tableau et dispose tous les tenseurs
+          if (Array.isArray(yoloOutput)) {
+            yoloOutput.forEach(tensor => tensor.dispose());
+          } else {
+            yoloOutput.dispose();
+          }
+          
+          // Récupérer les prédictions brutes
+          const yoloRawPredictions = yoloData[0];
+          
+          // Convertir les prédictions YOLO au format compatible
+          for (let i = 0; i < yoloRawPredictions.length; i++) {
+            const [x, y, w, h, score, classId] = yoloRawPredictions[i];
+            
+            // Ne garder que les prédictions avec un score suffisant
+            if (score > 0.5) {
+              // Convertir au format attendu par le reste du code
+              allPredictions.push({
+                bbox: [
+                  (x - w/2) * video.videoWidth, 
+                  (y - h/2) * video.videoHeight,
+                  w * video.videoWidth, 
+                  h * video.videoHeight
+                ],
+                class: `custom-${Math.round(classId)}`, 
+                score
+              });
+            }
+          }
+        } catch (yoloError) {
+          console.error("Erreur lors de l'inférence YOLO:", yoloError);
+          // Continuer avec seulement les prédictions COCO-SSD en cas d'erreur
+        }
       }
+      
+      // Filtrer par seuil de confiance et trier
+      const filteredPredictions = allPredictions
+        .filter(prediction => prediction.score > 0.35)
+        .sort((a, b) => b.score - a.score);
+        
+      // Enrichir les prédictions
+      const enhancedPredictions = enrichPredictions(filteredPredictions);
+      
+      // Vérifier si changement significatif
+      const lastPredClasses = lastPredictionsRef.current
+        .map(p => `${p.class}-${p.score.toFixed(2)}`)
+        .sort()
+        .join(',');
+        
+      const newPredClasses = enhancedPredictions
+        .map(p => `${p.class}-${p.score.toFixed(2)}`)
+        .sort()
+        .join(',');
+      
+      // Détecter si la scène a changé significativement
+      const isNewScene = lastPredClasses.split(',').length !== newPredClasses.split(',').length || 
+        (lastPredClasses.length > 0 && 
+         newPredClasses.length > 0 && 
+         !lastPredClasses.includes(newPredClasses.split(',')[0]));
+      
+      if (lastPredClasses !== newPredClasses) {
+        // Mise à jour des états
+        setPredictions(enhancedPredictions);
+        lastPredictionsRef.current = enhancedPredictions;
+        
+        // Analyser les dimensions des objets
+        const newAnalyses = {};
+        enhancedPredictions.forEach(pred => {
+          const objectId = `${pred.class}-${Math.random().toString(36).substring(2, 7)}`;
+          newAnalyses[objectId] = {
+            ...pred,
+            analyseComplete: analyserDimensionsObjets(pred, video.videoWidth, video.videoHeight),
+            horodatage: new Date().toISOString()
+          };
+        });
+        
+        setObjectAnalyses(prev => ({...prev, ...newAnalyses}));
+        
+        // Générer des descriptions audio des objets détectés
+        generateSceneDescription(enhancedPredictions, isNewScene);
+      }
+
+      // Nettoyer le canvas pour le nouveau rendu
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Appliquer les filtres visuels si nécessaire
+      if (brightness !== 100 || zoomLevel !== 1) {
+        ctx.filter = `brightness(${brightness}%)`;
+        ctx.save();
+
+        if (zoomLevel !== 1) {
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.scale(zoomLevel, zoomLevel);
+          ctx.translate(-canvas.width / 2, -canvas.height / 2);
+        }
+        
+        // Dessiner la vidéo avec filtres
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        ctx.filter = 'none';
+      }
+      
+      // Dessiner les rectangles et étiquettes des objets détectés
+      enhancedPredictions.forEach(prediction => {
+        const [x, y, width, height] = prediction.bbox;
+        const isSelected = selectedObject && selectedObject.class === prediction.class;
+
+        // Style du rectangle
+        ctx.strokeStyle = isSelected ? '#FF3366' : '#00FFFF';
+        ctx.lineWidth = isSelected ? 4 : 2;
+        ctx.lineJoin = 'round';
+
+        // Dessiner le rectangle (avec arrondis si disponible)
+        if (typeof ctx.roundRect === 'function') {
+          ctx.beginPath();
+          ctx.roundRect(x, y, width, height, 5);
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(x, y, width, height);
+        }
+
+        // Créer étiquette avec info-bulle pour chaque objet détecté
+        const text = `${prediction.icon} ${prediction.class} : ${(prediction.score * 100).toFixed(0)}%`;
+        const textWidth = ctx.measureText(text).width + 20;
+        const bubbleHeight = 30;
+
+        ctx.fillStyle = isSelected ? 'rgba(255, 51, 102, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+
+        // Créer bulle d'arrière-plan pour le texte
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(
+            x - 5,
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
+            textWidth,
+            bubbleHeight,
+            5
+          );
+        } else {
+          ctx.fillRect(
+            x - 5,
+            y > bubbleHeight + 10 ? y - bubbleHeight - 5 : y + height + 5,
+            textWidth,
+            bubbleHeight
+          );
+        }
+        ctx.fill();
+
+        // Ajouter le texte de l'étiquette
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(
+          text,
+          x + 5,
+          y > bubbleHeight + 10 ? y - bubbleHeight / 2 - 5 : y + height + bubbleHeight / 2 + 5
+        );
+      });
+      
     } catch (error) {
       console.error("Erreur pendant la détection:", error);
     }
 
-    // Boucle de détection continue avec requestAnimationFrame pour meilleures performances
-    animationFrameRef.current = requestAnimationFrame(detectFrame);
+    // Boucle de détection continue
+    requestAnimationFrame(detectFrame);
   }, [isDetecting, selectedObject, zoomLevel, brightness, detectionInterval, generateSceneDescription]);
 
   // Démarrer la détection une fois le modèle chargé
   useEffect(() => {
     if (!loadingModel) {
-      // Utiliser une promesse pour s'assurer que le premier frame est rendu avant
-      // de commencer l'analyse, pour une meilleure synchronisation
-      Promise.resolve().then(() => {
-        detectFrame();
-      });
+      detectFrame();
     }
-    
-    return () => {
-      // Nettoyer l'animation frame à la fermeture
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
   }, [detectFrame, loadingModel]);
 
   /**
@@ -787,7 +645,7 @@ const Analyse = () => {
   };
 
   /**
-   * Analyse une image capturée ou chargée
+   * Analyse une image capturée ou chargée - CORRIGÉE pour éviter les redéclarations
    */
   const analyzeImage = async () => {
     if (!capturedImage || !modelRef.current?.cocoModel) return;
@@ -805,15 +663,9 @@ const Analyse = () => {
       // Tableau pour stocker toutes les prédictions
       let allPredictions = [];
 
-      // Utiliser un tenseur pour optimiser l'analyse
-      const imgTensor = tf.browser.fromPixels(img);
-      
       // COCO-SSD predictions
-      const cocoPredictions = await modelRef.current.cocoModel.detect(imgTensor);
+      const cocoPredictions = await modelRef.current.cocoModel.detect(img, 10);
       allPredictions = [...cocoPredictions];
-      
-      // Libérer le tenseur image après l'analyse COCO
-      imgTensor.dispose();
       
       // YOLO predictions si disponibles
       if (modelRef.current.yoloModel) {
@@ -908,13 +760,6 @@ const Analyse = () => {
       console.error("Erreur lors de l'analyse de l'image:", error);
       setErrorMessage("Erreur lors de l'analyse de l'image");
       speechManagerRef.current.speak("Erreur lors de l'analyse de l'image", 3);
-    } finally {
-      // Forcer un collecteur de mémoire pour libérer les ressources
-      tf.engine().endScope();
-      if (tf.memory().numTensors > 0) {
-        console.log(`Tenseurs restants: ${tf.memory().numTensors}`);
-        tf.disposeVariables();
-      }
     }
   };
 
@@ -980,7 +825,7 @@ const Analyse = () => {
           exit={{ opacity: 0 }}
           aria-live="polite"
         >
-          <div className="loader" aria-hidden="true"></div>
+                   <div className="loader" aria-hidden="true"></div>
           <h2>Chargement des modèles d'IA...</h2>
           <p>Préparation des réseaux de neurones et bases de connaissances</p>
         </motion.div>
@@ -1010,23 +855,9 @@ const Analyse = () => {
                   ref={webcamRef}
                   audio={false}
                   screenshotFormat="image/jpeg"
-                  videoConstraints={{ 
-                    facingMode: cameraFacingMode, 
-                    aspectRatio: 4 / 3,
-                    // Optimisation des paramètres vidéo pour meilleures performances
-                    width: { ideal: 640 },
-                    height: { ideal: 480 },
-                    frameRate: { ideal: 30 }
-                  }}
+                                   videoConstraints={{ facingMode: cameraFacingMode, aspectRatio: 4 / 3 }}
                   className="webcam"
                   style={{ filter: `brightness(${brightness}%)`, transform: `scale(${zoomLevel})` }}
-                  onLoadedMetadata={() => {
-                    console.log("Caméra initialisée");
-                    // Précharger l'audio pour réduire la latence
-                    if (audioEnabled) {
-                      speechManagerRef.current.initialize();
-                    }
-                  }}
                 />
                 <canvas ref={canvasRef} className="detection-canvas" />
               </>
@@ -1202,16 +1033,6 @@ const Analyse = () => {
               <BsZoomIn />
             </motion.button>
 
-            <motion.button
-              whileTap={{ scale: 0.9 }}
-              className="tool-button"
-              onClick={() => setAudioEnabled(prev => !prev)}
-              title={audioEnabled ? "Désactiver l'audio" : "Activer l'audio"}
-              aria-label={audioEnabled ? "Désactiver l'audio" : "Activer l'audio"}
-            >
-              {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />}
-            </motion.button>
-
             <label className="tool-button" title="Charger une image" aria-label="Charger une image">
               <MdPhotoLibrary />
               <input
@@ -1225,7 +1046,6 @@ const Analyse = () => {
                     reader.onloadend = () => {
                       setCapturedImage(reader.result);
                       setIsDetecting(false);
-                      // Utiliser setTimeout pour s'assurer que l'état est mis à jour
                       setTimeout(() => analyzeImage(), 100);
                     };
                     reader.readAsDataURL(file);

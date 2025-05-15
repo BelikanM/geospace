@@ -1,0 +1,5 @@
+.bar-nav-container { display: flex; flex-direction: column; height: 100%; }
+.bar-nav { display: flex; justify-content: center; gap: 1rem; padding: 0.5rem; background: #333; }
+.bar-button { background: none; border: none; color: #888; cursor: pointer; }
+.bar-button.active { color: #fff; }
+.bar-content { flex: 1; padding: 1rem; }
