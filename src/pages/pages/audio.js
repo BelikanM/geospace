@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FaCamera, FaSave, FaInfoCircle, FaCog, FaExchangeAlt, FaVolumeUp, FaVolumeMute, FaRobot, FaBrain } from 'react-icons/fa';
 import { BsZoomIn, BsZoomOut } from 'react-icons/bs';
 import { MdPhotoLibrary, MdOutlineInfo } from 'react-icons/md';
+import { saveAs } from 'file-saver';
 import './Analyse.css';
 
 // On initialise avec un objet vide qui sera remplacé par les données du fichier JSON
@@ -654,7 +655,7 @@ const Analyse = () => {
     // Formater les groupes en texte
     const descriptions = Object.keys(groupes).map(classe => {
       const nombre = groupes[classe].length;
-           const pluriel = nombre > 1 ? "s" : "";
+      const pluriel = nombre > 1 ? "s" : "";
       return `${nombre} ${classe}${pluriel}`;
     });
 
@@ -668,6 +669,39 @@ const Analyse = () => {
       return `Détecté: ${descriptions.join(', ')} et ${dernier}.`;
     }
   }, []);
+
+  /**
+   * Sauvegarde la description de la scène dans un fichier texte
+   */
+  const sauvegarderDescription = useCallback(() => {
+    const currentDate = new Date();
+    const formattedDate = currentDate.toISOString().slice(0, 19).replace(/:/g, '-');
+
+    // Structure du fichier avec informations détaillées
+    const contenu = `
+Date : ${formattedDate}\n\n
+Description de la scène :\n${lastSceneDescription}\n\n
+Objets détectés : \n${predictions.map(pred => `
+- Classe : ${pred.class}
+  Confiance : ${(pred.score * 100).toFixed(2)}%
+  Position (x, y, largeur, hauteur) : [${pred.bbox.join(', ')}]
+  ${pred.dimensions ? `Dimensions : ${JSON.stringify(pred.dimensions, null, 2)}` : ''}
+  Source : ${pred.source}
+`).join('\n')}
+`;
+
+    // Créer un fichier Blob avec la description
+    const blob = new Blob([contenu], { type: 'text/plain;charset=utf-8' });
+
+    // Sauvegarder le fichier avec FileSaver.js
+    saveAs(blob, `analyse-scene-${formattedDate}.txt`);
+    
+    addLog("Description de la scène sauvegardée dans un fichier texte.", "success");
+
+    if (audioEnabled) {
+      speechManagerRef.current.speak("Description de la scène enregistrée avec succès.", 2);
+    }
+  }, [lastSceneDescription, predictions, audioEnabled, addLog]);
 
   /**
    * Prépare et traite une image pour la détection d'objets
@@ -947,65 +981,41 @@ const Analyse = () => {
             selectedObject.class === prediction.class && 
             JSON.stringify(selectedObject.bbox) === JSON.stringify(prediction.bbox);
           
-          // Couleur basée sur la source et la confiance
-          let strokeColor = "rgba(0, 255, 0, 0.8)"; // Vert pour COCO-SSD par défaut
-
+                   // Couleur basée sur la confiance et si l'objet est sélectionné
+          const confidence = prediction.score;
+          let color;
           if (isSelected) {
-            strokeColor = "rgba(255, 215, 0, 0.9)"; // Or pour la sélection
-          } else if (prediction.source === 'YOLO') {
-            strokeColor = "rgba(255, 165, 0, 0.8)"; // Orange pour YOLO
-          } else if (prediction.score < 0.6) {
-            strokeColor = "rgba(255, 69, 0, 0.8)"; // Rouge orangé pour faible confiance
+            color = 'rgba(255, 215, 0, 0.8)'; // Or pour sélection
+          } else if (confidence > 0.8) {
+            color = 'rgba(0, 255, 0, 0.6)'; // Vert pour haute confiance
+          } else if (confidence > 0.6) {
+            color = 'rgba(255, 255, 0, 0.6)'; // Jaune pour confiance moyenne
+          } else {
+            color = 'rgba(255, 0, 0, 0.6)'; // Rouge pour faible confiance
           }
           
           // Dessiner le rectangle
-          ctx.strokeStyle = strokeColor;
+          ctx.strokeStyle = color;
           ctx.lineWidth = isSelected ? 4 : 2;
           ctx.strokeRect(x, y, width, height);
           
-          // Fond semi-transparent pour le texte
-          const textWidth = ctx.measureText(`${prediction.class} (${Math.round(prediction.score * 100)}%)`).width + 10;
-          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-          ctx.fillRect(x, y - 22, textWidth, 22);
+          // Dessiner l'étiquette avec fond semi-transparent
+          const label = `${prediction.class} ${(confidence * 100).toFixed(1)}%`;
+          const textWidth = ctx.measureText(label).width;
           
-          // Texte d'identification
-          ctx.fillStyle = "white";
-          ctx.font = "16px Arial";
-          ctx.fillText(
-            `${prediction.class} (${Math.round(prediction.score * 100)}%)`, 
-            x + 5, 
-            y - 5
-          );
+          // Fond de l'étiquette
+          ctx.fillStyle = color;
+          ctx.fillRect(x, y - 30, textWidth + 10, 30);
           
-          // Ajouter un indicateur d'icône si disponible
+          // Texte de l'étiquette
+          ctx.fillStyle = 'white';
+          ctx.font = '18px Arial';
+          ctx.fillText(label, x + 5, y - 8);
+          
+          // Ajouter une icône si disponible
           if (prediction.icon) {
-            ctx.font = "18px Arial";
-            ctx.fillText(prediction.icon, x + width - 25, y - 5);
-          }
-          
-          // Si l'objet est sélectionné, ajouter des informations supplémentaires
-          if (isSelected) {
-            const infoY = y + height + 20;
-            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-            ctx.fillRect(x, infoY, width, 70);
-            ctx.fillStyle = "white";
-            ctx.font = "14px Arial";
-            
-            // Afficher les dimensions
-            ctx.fillText(`Dim: ${Math.round(width)}×${Math.round(height)} px`, x + 5, infoY + 18);
-            
-            // Afficher les catégories
-            if (prediction.categories && prediction.categories.length > 0) {
-              ctx.fillText(`Type: ${prediction.categories.join(', ')}`, x + 5, infoY + 38);
-            }
-            
-            // Afficher une info d'utilisation courte
-            if (prediction.utilisation) {
-              const shortUsage = prediction.utilisation.length > 40 
-                ? prediction.utilisation.substring(0, 40) + '...' 
-                : prediction.utilisation;
-              ctx.fillText(`Usage: ${shortUsage}`, x + 5, infoY + 58);
-            }
+            ctx.font = '20px Arial';
+            ctx.fillText(prediction.icon, x + textWidth + 15, y - 8);
           }
         });
       }
@@ -1016,12 +1026,11 @@ const Analyse = () => {
     
     // Planifier la prochaine frame d'animation
     animationFrameRef.current = requestAnimationFrame(detectObjects);
-  }, [isDetecting, detectionInterval, brightness, zoomLevel, selectedObject, audioEnabled, detectionMode, 
-      genererDescriptionScene, preprocessImage, preprocessImageForYOLO, processYOLOOutput, addLog]);
+  }, [isDetecting, zoomLevel, brightness, selectedObject, audioEnabled, detectionMode, detectionInterval, genererDescriptionScene, preprocessImage, preprocessImageForYOLO, processYOLOOutput, addLog]);
 
-  // Démarrer la détection lorsque le composant est monté
+  // Démarrer la détection d'objets lorsque le composant est monté
   useEffect(() => {
-    if (!loadingModel && !errorMessage) {
+    if (!loadingModel && isDetecting) {
       detectObjects();
     }
     return () => {
@@ -1029,502 +1038,372 @@ const Analyse = () => {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [loadingModel, errorMessage, detectObjects]);
+  }, [detectObjects, loadingModel, isDetecting]);
 
-  // Capturer une image de la webcam
+  // Gérer la capture d'image
   const captureImage = useCallback(() => {
     if (webcamRef.current) {
       const imageSrc = webcamRef.current.getScreenshot();
       setCapturedImage(imageSrc);
-      setIsDetecting(false); // Arrêter la détection pendant la visualisation de l'image
+      setIsDetecting(false);
+      addLog("Image capturée pour analyse détaillée", "info");
       
-      // Annoncer la capture vocalement
       if (audioEnabled) {
-        speechManagerRef.current.speak("Image capturée. Analyse en cours.", 3);
+        speechManagerRef.current.speak("Image capturée. Analyse détaillée en cours.", 2);
       }
-      
-      // Simuler une analyse approfondie sur l'image capturée
-      addLog("Analyse détaillée de l'image capturée...", "processing");
-      
-      // Créer une image pour l'analyse
-      const img = new Image();
-      img.src = imageSrc;
-      img.onload = async () => {
-        try {
-          // Analyse avec le modèle COCO-SSD
-          const tensor = preprocessImage(img);
-          const cocoResults = await modelRef.current.cocoModel.detect(tensor);
-          tensor.dispose();
-          
-          // Combiner les résultats des différents modèles
-          let allResults = [...cocoResults];
-          
-          // Ajouter les prédictions du modèle YOLO si disponible
-          if (modelRef.current.yoloModel) {
-            try {
-              // Prétraiter l'image spécifiquement pour YOLO
-              const yoloTensor = preprocessImageForYOLO(img, modelRef.current.yoloModel);
-              
-              if (yoloTensor) {
-                // Exécuter l'inférence avec le modèle YOLO
-                const yoloOutput = modelRef.current.yoloModel.predict(yoloTensor);
-                
-                // Traiter les résultats de YOLO et les convertir en format compatible
-                const yoloResults = processYOLOOutput(yoloOutput, img.width, img.height);
-                
-                // Libérer la mémoire
-                yoloTensor.dispose();
-                yoloOutput.dispose();
-                
-                // Ajouter les résultats de YOLO à nos prédictions
-                allResults = [...allResults, ...yoloResults];
-                
-                addLog(`YOLO a détecté ${yoloResults.length} objets dans l'image capturée`, "info");
-              }
-            } catch (yoloError) {
-              console.error("Erreur lors de la détection YOLO:", yoloError);
-              addLog(`Erreur YOLO: ${yoloError.message}`, "error");
-            }
-          }
-          
-          // Enrichir les résultats
-          const enrichedResults = enrichPredictions(allResults);
-          setPredictions(enrichedResults);
-          
-          // Mettre à jour les analyses dimensionnelles
-          const analysesObj = {};
-          enrichedResults.forEach(pred => {
-            analysesObj[pred.class + '-' + pred.bbox.join(',')] = analyserDimensionsObjets(
-              pred, img.width, img.height
-            );
-          });
-          setObjectAnalyses(analysesObj);
-          
-          // Générer une description
-          const description = genererDescriptionScene(enrichedResults);
-          setLastSceneDescription(description);
-          
-          // Annoncer les résultats vocalement
-          if (audioEnabled) {
-            speechManagerRef.current.speak(
-              `Analyse terminée. ${description}`,
-              3, 'image-analysis'
-            );
-          }
-          
-          addLog(`Analyse de l'image terminée: ${description}`, "success");
-        } catch (error) {
-          console.error("Erreur lors de l'analyse de l'image capturée:", error);
-          addLog(`Erreur d'analyse: ${error.message}`, "error");
-        }
-      };
     }
-  }, [webcamRef, audioEnabled, setIsDetecting, preprocessImage, preprocessImageForYOLO, processYOLOOutput, analyserDimensionsObjets, genererDescriptionScene, addLog]);
+  }, [audioEnabled, addLog]);
 
-  // Retourner à la vue webcam depuis l'image capturée
-  const retourWebcam = useCallback(() => {
+  // Reprendre la détection en direct
+  const resumeDetection = useCallback(() => {
     setCapturedImage(null);
     setIsDetecting(true);
-    addLog("Retour au mode détection en temps réel", "info");
+    addLog("Reprise de la détection en temps réel", "info");
   }, [addLog]);
 
-  // Fonction pour changer la caméra (avant/arrière)
+  // Basculer entre les caméras avant et arrière
   const toggleCamera = useCallback(() => {
     setCameraFacingMode(prevMode => 
       prevMode === "user" ? "environment" : "user"
     );
-    addLog(`Basculement vers la caméra ${cameraFacingMode === "user" ? "arrière" : "avant"}`, "info");
+    addLog(`Changement de caméra: ${cameraFacingMode === "user" ? "arrière" : "avant"}`, "info");
   }, [cameraFacingMode, addLog]);
 
   // Gérer la sélection d'un objet détecté
-  const handleObjectClick = useCallback((event) => {
-    // Ne rien faire si on est en mode image capturée sans détection
-    if (!isDetecting && !capturedImage) return;
+  const handleObjectClick = useCallback((prediction) => {
+    setSelectedObject(prediction);
+    addLog(`Objet sélectionné: ${prediction.class}`, "info");
     
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    // Obtenir les coordonnées du clic relatif au canvas
-    const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-    
-    // Vérifier si le clic est sur un objet détecté
-    let clickedObject = null;
-    
-    // Parcourir les prédictions de la plus petite à la plus grande (pour gérer le cas où un petit objet est à l'intérieur d'un grand)
-    [...predictions]
-      .sort((a, b) => {
-        const areaA = a.bbox[2] * a.bbox[3];
-        const areaB = b.bbox[2] * b.bbox[3];
-        return areaA - areaB; // Trier du plus petit au plus grand
-      })
-      .forEach(prediction => {
-        const [objX, objY, objWidth, objHeight] = prediction.bbox;
-        if (x >= objX && x <= objX + objWidth && y >= objY && y <= objY + objHeight) {
-          clickedObject = prediction;
-        }
-      });
-    
-    // Mettre à jour l'objet sélectionné
-    setSelectedObject(clickedObject);
-    
-    // Annoncer vocalement l'objet sélectionné
-    if (clickedObject && audioEnabled) {
-      const objectName = clickedObject.class;
-      const message = `${objectName} sélectionné${objectName.endsWith('e') ? 'e' : ''}.`;
-      speechManagerRef.current.speak(message, 2, 'selection');
-      
-      // Ajouter un message informatif supplémentaire basé sur les caractéristiques
-      if (clickedObject.caracteristiques) {
-        const infoShort = clickedObject.caracteristiques.split('.')[0]; // Première phrase seulement
-        setTimeout(() => {
-          speechManagerRef.current.speak(infoShort, 1, 'info-object');
-        }, 1000);
-      }
-      
-      addLog(`Objet sélectionné: ${objectName}`, "info");
-    } else if (!clickedObject) {
-      addLog("Aucun objet sélectionné à cet emplacement", "info");
-    }
-  }, [predictions, isDetecting, capturedImage, audioEnabled, addLog]);
-
-  // Gérer le téléchargement de l'image analysée
-  const handleSaveImage = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    // Créer un lien de téléchargement
-    const link = document.createElement('a');
-    link.download = `analyse-objets-${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.png`;
-    
-    // Convertir le canvas en URL de données
-    link.href = canvas.toDataURL('image/png');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    addLog("Image sauvegardée", "success");
-    
-    // Confirmation vocale
     if (audioEnabled) {
-      speechManagerRef.current.speak("Image enregistrée avec les annotations d'analyse.", 2);
+      const message = `${prediction.class} sélectionné. ${prediction.caracteristiques ? prediction.caracteristiques.substring(0, 100) : ''}`;
+      speechManagerRef.current.speak(message, 2);
     }
   }, [audioEnabled, addLog]);
-
-  // Conteneur pour les contraintes vidéo
-  const videoConstraints = {
-    width: 640,
-    height: 480,
-    facingMode: cameraFacingMode,
-    aspectRatio: 1.333,
-  };
-
-  // Paramètres de style CSS pour le zoom et la luminosité
-  const webcamStyle = {
-    transform: `scale(${zoomLevel})`,
-    filter: `brightness(${brightness}%)`,
-    transformOrigin: 'center',
-  };
 
   // Rendu du composant
   return (
     <div className="analyse-container">
-      {loadingModel ? (
-        <div className="loading-container">
-          <div className="loading-spinner"></div>
-          <h2>Chargement des modèles d'IA...</h2>
-          <p>Préparation des capacités de détection d'objets et d'analyse.</p>
-          <div className="progress-bar">
-            <div className="progress-fill"></div>
+      {/* Overlay de chargement */}
+      {loadingModel && (
+        <div className="loading-overlay">
+          <div className="loading-content">
+            <div className="spinner"></div>
+            <h2>Chargement des modèles d'IA...</h2>
+            <p>Préparation de l'analyse visuelle</p>
           </div>
         </div>
-      ) : errorMessage ? (
-        <div className="error-container">
-          <h2>Erreur</h2>
-          <p>{errorMessage}</p>
-          <button onClick={() => window.location.reload()}>
-            Recharger l'application
+      )}
+      
+      {/* Message d'erreur */}
+      {errorMessage && (
+        <div className="error-overlay">
+          <div className="error-content">
+            <h2>Erreur</h2>
+            <p>{errorMessage}</p>
+            <button onClick={() => window.location.reload()}>Réessayer</button>
+          </div>
+        </div>
+      )}
+      
+      {/* Panneau principal */}
+      <div className="main-panel">
+        {/* Affichage de la webcam ou de l'image capturée */}
+        <div className="camera-container" style={{ filter: `brightness(${brightness}%)` }}>
+          {!capturedImage ? (
+            <>
+              <Webcam
+                ref={webcamRef}
+                audio={false}
+                screenshotFormat="image/jpeg"
+                videoConstraints={{
+                  facingMode: cameraFacingMode,
+                  aspectRatio: 4/3
+                }}
+                style={{
+                  transform: `scale(${zoomLevel})`,
+                  transformOrigin: 'center'
+                }}
+              />
+              <canvas
+                ref={canvasRef}
+                className="detection-canvas"
+              />
+            </>
+          ) : (
+            <div className="captured-image-container">
+              <img 
+                src={capturedImage} 
+                alt="Captured" 
+                className="captured-image"
+                style={{
+                  transform: `scale(${zoomLevel})`,
+                  transformOrigin: 'center'
+                }}
+              />
+            </div>
+          )}
+        </div>
+        
+        {/* Barre d'outils */}
+        <div className="toolbar">
+          <button 
+            onClick={capturedImage ? resumeDetection : captureImage}
+            className="tool-button"
+            title={capturedImage ? "Reprendre la détection" : "Capturer l'image"}
+          >
+            {capturedImage ? <MdPhotoLibrary /> : <FaCamera />}
+          </button>
+          
+          <button 
+            onClick={toggleCamera} 
+            className="tool-button"
+            title="Changer de caméra"
+          >
+            <FaExchangeAlt />
+          </button>
+          
+          <button 
+            onClick={() => setZoomLevel(prev => Math.min(prev + 0.1, 2))}
+            className="tool-button"
+            title="Zoom avant"
+          >
+            <BsZoomIn />
+          </button>
+          
+          <button 
+            onClick={() => setZoomLevel(prev => Math.max(prev - 0.1, 1))}
+            className="tool-button"
+            title="Zoom arrière"
+          >
+            <BsZoomOut />
+          </button>
+          
+          <button 
+            onClick={() => setAudioEnabled(prev => !prev)}
+            className={`tool-button ${audioEnabled ? 'active' : ''}`}
+            title={audioEnabled ? "Désactiver l'audio" : "Activer l'audio"}
+          >
+            {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />}
+          </button>
+          
+          <button 
+            onClick={() => setShowSettings(prev => !prev)}
+            className={`tool-button ${showSettings ? 'active' : ''}`}
+            title="Paramètres"
+          >
+            <FaCog />
+          </button>
+          
+          <button 
+            onClick={() => setShowAiLogs(prev => !prev)}
+            className={`tool-button ${showAiLogs ? 'active' : ''}`}
+            title="Logs d'IA"
+          >
+            <FaBrain />
+          </button>
+          
+          <button 
+            onClick={sauvegarderDescription}
+            className="tool-button"
+            title="Sauvegarder la description"
+            disabled={!lastSceneDescription}
+          >
+            <FaSave />
           </button>
         </div>
-      ) : (
-        <>
-          <div className="camera-container">
-            {capturedImage ? (
-              <img
-                src={capturedImage}
-                alt="Captured"
-                style={{ width: '100%', height: 'auto' }}
-              />
-            ) : (
-              <Webcam
-                audio={false}
-                ref={webcamRef}
-                screenshotFormat="image/jpeg"
-                videoConstraints={videoConstraints}
-                style={webcamStyle}
-                className="webcam"
-                mirrored={cameraFacingMode === "user"}
-              />
-            )}
-            
-            <canvas
-              ref={canvasRef}
-              className="detection-canvas"
-              onClick={handleObjectClick}
-            />
-            
-            <div className="scene-description">
-              <FaRobot className="icon" />
-              <span>{lastSceneDescription || "Aucun objet détecté."}</span>
-            </div>
-          </div>
-          
-          <div className="controls">
-            <button 
-              className="control-button"
-              onClick={capturedImage ? retourWebcam : captureImage}
-              title={capturedImage ? "Retour à la caméra" : "Capturer l'image"}
+        
+        {/* Panneau de paramètres */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div 
+              className="settings-panel"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              transition={{ duration: 0.2 }}
             >
-              {capturedImage ? <MdPhotoLibrary /> : <FaCamera />}
-            </button>
-            
-            <button 
-              className="control-button"
-              onClick={handleSaveImage}
-              title="Enregistrer l'image avec annotations"
-            >
-              <FaSave />
-            </button>
-            
-            <button 
-              className="control-button"
-              onClick={toggleCamera}
-              title="Changer de caméra"
-            >
-              <FaExchangeAlt />
-            </button>
-            
-            <button 
-              className="control-button"
-              onClick={() => setAudioEnabled(!audioEnabled)}
-              title={audioEnabled ? "Désactiver l'audio" : "Activer l'audio"}
-            >
-              {audioEnabled ? <FaVolumeUp /> : <FaVolumeMute />}
-            </button>
-            
-            <button 
-              className="control-button"
-              onClick={() => setShowSettings(!showSettings)}
-              title="Paramètres"
-            >
-              <FaCog />
-            </button>
-            
-            <button 
-              className="control-button"
-              onClick={() => setShowAiLogs(!showAiLogs)}
-              title={showAiLogs ? "Masquer logs IA" : "Afficher logs IA"}
-            >
-              <FaBrain />
-            </button>
-          </div>
-          
-          <AnimatePresence>
-            {showSettings && (
-              <motion.div 
-                className="settings-panel"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-              >
-                <h3>Paramètres</h3>
-                
-                <div className="setting-group">
-                  <label>Zoom: {zoomLevel.toFixed(1)}x</label>
-                  <div className="setting-controls">
-                    <button onClick={() => setZoomLevel(Math.max(1, zoomLevel - 0.1))}>
-                      <BsZoomOut />
-                    </button>
-                    <input
-                      type="range"
-                      min="1"
-                      max="3"
-                      step="0.1"
-                      value={zoomLevel}
-                      onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
-                    />
-                    <button onClick={() => setZoomLevel(Math.min(3, zoomLevel + 0.1))}>
-                      <BsZoomIn />
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="setting-group">
-                  <label>Luminosité: {brightness}%</label>
-                  <input
-                    type="range"
-                    min="50"
-                    max="150"
-                    value={brightness}
-                    onChange={(e) => setBrightness(parseInt(e.target.value))}
+              <h3>Paramètres</h3>
+              
+              <div className="setting-item">
+                <label>Luminosité: {brightness}%</label>
+                <input 
+                  type="range" 
+                  min="50" 
+                  max="150" 
+                  value={brightness} 
+                  onChange={(e) => setBrightness(parseInt(e.target.value))}
+                />
+              </div>
+              
+              <div className="setting-item">
+                <label>Zoom: {zoomLevel.toFixed(1)}x</label>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="2" 
+                  step="0.1" 
+                  value={zoomLevel} 
+                  onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                />
+              </div>
+              
+              <div className="setting-item">
+                <label>Mode de détection:</label>
+                <select 
+                  value={detectionMode} 
+                  onChange={(e) => setDetectionMode(e.target.value)}
+                >
+                  <option value="fast">Rapide (moins précis)</option>
+                  <option value="normal">Normal</option>
+                  <option value="detail">Détaillé (plus lent)</option>
+                </select>
+              </div>
+              
+              <div className="setting-item">
+                <label>
+                  <input 
+                    type="checkbox" 
+                    checked={darkMode} 
+                    onChange={() => setDarkMode(prev => !prev)}
                   />
-                </div>
-                
-                <div className="setting-group">
-                  <label>Mode de détection:</label>
-                  <select 
-                    value={detectionMode}
-                    onChange={(e) => setDetectionMode(e.target.value)}
-                  >
-                    <option value="fast">Rapide (moins précis)</option>
-                    <option value="normal">Normal (équilibré)</option>
-                                       <option value="detail">Détaillé (plus lent)</option>
-                  </select>
-                </div>
-                
-                <div className="setting-group">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={darkMode}
-                      onChange={() => setDarkMode(!darkMode)}
-                    />
-                    Mode sombre
-                  </label>
-                </div>
-                
-                <div className="setting-group">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={enableCloudAnalysis}
-                      onChange={() => setEnableCloudAnalysis(!enableCloudAnalysis)}
-                    />
-                    Analyse cloud (plus précise)
-                  </label>
-                </div>
-                
-                <button onClick={() => setShowSettings(false)}>Fermer</button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          
-          {/* Panel d'informations détaillées sur l'objet sélectionné */}
-          <AnimatePresence>
-            {selectedObject && (
-              <motion.div 
-                className="object-info-panel"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-              >
-                <h3>
-                  {selectedObject.icon && <span className="object-icon">{selectedObject.icon} </span>}
-                  {selectedObject.class}
-                  <span className="confidence-badge" style={{ 
-                    backgroundColor: selectedObject.score > 0.8 ? '#4caf50' : selectedObject.score > 0.6 ? '#ff9800' : '#f44336' 
-                  }}>
-                    {Math.round(selectedObject.score * 100)}%
-                  </span>
-                  <button className="close-button" onClick={() => setSelectedObject(null)}>×</button>
-                </h3>
-                
-                <div className="info-source">
-                  <small>Détecté par: {selectedObject.source || 'COCO-SSD'}</small>
-                </div>
-                
-                <div className="object-info-content">
-                  {selectedObject.caracteristiques && (
-                    <div className="info-section">
-                      <h4>Caractéristiques</h4>
-                      <p>{selectedObject.caracteristiques}</p>
-                    </div>
-                  )}
-                  
-                  {selectedObject.utilisation && (
-                    <div className="info-section">
-                      <h4>Utilisation</h4>
-                      <p>{selectedObject.utilisation}</p>
-                    </div>
-                  )}
-                  
-                  {selectedObject.categories && selectedObject.categories.length > 0 && (
-                    <div className="info-section">
-                      <h4>Catégories</h4>
-                      <div className="tags">
-                        {selectedObject.categories.map((cat, index) => (
-                          <span key={index} className="tag">{cat}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {selectedObject.materiaux && selectedObject.materiaux.length > 0 && (
-                    <div className="info-section">
-                      <h4>Matériaux courants</h4>
-                      <div className="tags">
-                        {selectedObject.materiaux.map((mat, index) => (
-                          <span key={index} className="tag">{mat}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')] && (
-                    <div className="info-section">
-                      <h4>Analyse dimensionnelle</h4>
-                      <div className="dimension-info">
-                        <p>
-                          <strong>Dimensions (px):</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].taillePixels.largeur} × {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].taillePixels.hauteur}
-                        </p>
-                        <p>
-                          <strong>Proportion:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].proportionImage.surface}
-                        </p>
-                        <p>
-                          <strong>Distance estimée:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].distanceEstimee}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {selectedObject.conseil && (
-                    <div className="info-section">
-                      <h4>Conseil</h4>
-                      <p className="tip">{selectedObject.conseil}</p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          
-          {/* Panneau des logs d'IA */}
-          <AnimatePresence>
-            {showAiLogs && (
-              <motion.div 
-                className="ai-logs-panel"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-              >
-                <div className="logs-header">
-                  <h3><FaBrain /> Logs d'IA</h3>
-                  <button onClick={() => setShowAiLogs(false)}>×</button>
-                </div>
-                <div className="logs-content">
-                  {aiLogs.map((log, index) => (
-                    <div key={index} className={`log-entry log-${log.type}`}>
-                      <span className="log-time">{log.timestamp}</span>
-                      <span className="log-message">{log.message}</span>
-                    </div>
+                  Mode sombre
+                </label>
+              </div>
+              
+              <div className="setting-item">
+                <label>
+                  <input 
+                    type="checkbox" 
+                    checked={enableCloudAnalysis} 
+                    onChange={() => setEnableCloudAnalysis(prev => !prev)}
+                  />
+                  Analyse cloud avancée
+                </label>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        {/* Panneau des logs d'IA */}
+        <AnimatePresence>
+          {showAiLogs && (
+            <motion.div 
+              className="ai-logs-panel"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              transition={{ duration: 0.2 }}
+            >
+              <h3>Logs d'IA <FaRobot /></h3>
+              <div className="logs-container">
+                {aiLogs.map((log, index) => (
+                  <div key={index} className={`log-entry ${log.type}`}>
+                    <span className="log-time">{log.timestamp}</span>
+                    <span className="log-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      
+      {/* Panneau d'informations */}
+      <div className="info-panel">
+        <div className="info-header">
+          <h2>
+            <FaInfoCircle /> {selectedObject ? `Détails: ${selectedObject.class}` : "Objets détectés"}
+          </h2>
+          {lastSceneDescription && (
+            <div className="scene-description">
+              <p>{lastSceneDescription}</p>
+            </div>
+          )}
+        </div>
+        
+        {selectedObject ? (
+          <div className="object-details">
+            <div className="object-header">
+              <h3>{selectedObject.icon} {selectedObject.class}</h3>
+              <span className="confidence">
+                Confiance: {(selectedObject.score * 100).toFixed(1)}% ({selectedObject.certainty})
+              </span>
+              <span className="source-model">
+                Source: {selectedObject.source}
+              </span>
+            </div>
+            
+            <div className="details-grid">
+              <div className="detail-section">
+                <h4>Caractéristiques</h4>
+                <p>{selectedObject.caracteristiques}</p>
+              </div>
+              
+              <div className="detail-section">
+                <h4>Utilisation</h4>
+                <p>{selectedObject.utilisation}</p>
+              </div>
+              
+              <div className="detail-section">
+                <h4>Dimensions</h4>
+                <p>
+                  {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')] ? (
+                    <>
+                      <strong>Taille relative:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].proportionImage.surface} de l'image<br />
+                      <strong>Distance estimée:</strong> {objectAnalyses[selectedObject.class + '-' + selectedObject.bbox.join(',')].distanceEstimee}<br />
+                      {selectedObject.dimensions.estimationTailleReelle && (
+                        <span><strong>Dimensions typiques:</strong> {JSON.stringify(selectedObject.dimensions.estimationTailleReelle)}</span>
+                      )}
+                    </>
+                  ) : "Analyse dimensionnelle non disponible"}
+                </p>
+              </div>
+              
+              <div className="detail-section">
+                <h4>Catégories</h4>
+                <div className="tags">
+                  {selectedObject.categories && selectedObject.categories.map((cat, idx) => (
+                    <span key={idx} className="tag">{cat}</span>
                   ))}
                 </div>
-              </motion.div>
+              </div>
+              
+              <div className="detail-section">
+                <h4>Conseil</h4>
+                <p>{selectedObject.conseil}</p>
+              </div>
+            </div>
+            
+            <button 
+              className="close-details" 
+              onClick={() => setSelectedObject(null)}
+            >
+              Retour à la liste
+            </button>
+          </div>
+        ) : (
+          <div className="objects-list">
+            {predictions.length > 0 ? (
+              predictions.map((prediction, index) => (
+                <div 
+                  key={index} 
+                  className="object-item"
+                  onClick={() => handleObjectClick(prediction)}
+                >
+                  <span className="object-icon">{prediction.icon || '📦'}</span>
+                  <span className="object-name">{prediction.class}</span>
+                  <span className="object-confidence">{(prediction.score * 100).toFixed(1)}%</span>
+                </div>
+              ))
+            ) : (
+              <div className="no-objects">
+                <p>Aucun objet détecté</p>
+                <p className="hint">Dirigez la caméra vers des objets pour les analyser</p>
+              </div>
             )}
-          </AnimatePresence>
-        </>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
